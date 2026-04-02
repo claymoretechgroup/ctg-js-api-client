@@ -4,8 +4,7 @@
     "description": "Minimal HTTP API client for Node.js with typed errors and zero dependencies",
     "type": "module",
     "exports": {
-        ".": "./src/CTGAPIClient.js",
-        "./error": "./src/CTGAPIClientError.js"
+        ".": "./src/index.js"
     },
     "scripts": {
         "test": "node tests/SelfTest.js"

@@ -43,7 +43,7 @@ export default class CTGAPIClient {
         this._token = null;
         this._allowedSchemes = CTGAPIClient._validateStringArray(config.allowed_schemes, "allowed_schemes");
         this._allowedHosts = CTGAPIClient._validateStringArray(config.allowed_hosts, "allowed_hosts");
-        this._maxResponseBytes = config.max_response_bytes || null;
+        this._maxResponseBytes = CTGAPIClient._validatePositiveInt(config.max_response_bytes, "max_response_bytes");
         this._blockPrivateIPs = config.block_private_ips !== undefined
             ? config.block_private_ips
             : (this._allowedSchemes !== null || this._allowedHosts !== null);
@@ -463,6 +463,16 @@ export default class CTGAPIClient {
         return value;
     }
 
+    // :: NUMBER|VOID, STRING -> NUMBER|VOID
+    // Validates that a config value is null/undefined or a positive integer.
+    static _validatePositiveInt(value, name) {
+        if (value === undefined || value === null) return null;
+        if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value !== Math.trunc(value)) {
+            throw new TypeError(`${name} must be a positive integer`);
+        }
+        return value;
+    }
+
     // :: Error, STRING, STRING, BOOL -> ctgAPIClientError
     // Classifies a fetch error into a typed CTGAPIClientError.
     static _classifyError(err, url, method, timedOut) {
@@ -605,11 +615,24 @@ export default class CTGAPIClient {
             throw new CTGAPIClientError("INVALID_URL", "Private/internal addresses are blocked");
         }
 
-        // IPv4-mapped IPv6 (::ffff:x.x.x.x) — extract IPv4 and re-check
-        const mappedMatch = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-        if (mappedMatch) {
+        // IPv4-mapped IPv6 — dotted-quad form (::ffff:127.0.0.1)
+        const mappedDotted = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+        if (mappedDotted) {
             for (const pattern of CTGAPIClient.PRIVATE_IP_PATTERNS) {
-                if (pattern.test(mappedMatch[1])) {
+                if (pattern.test(mappedDotted[1])) {
+                    throw new CTGAPIClientError("INVALID_URL", "Private/internal addresses are blocked");
+                }
+            }
+        }
+
+        // IPv4-mapped IPv6 — hex form (::ffff:7f00:1 = 127.0.0.1)
+        const mappedHex = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+        if (mappedHex) {
+            const hi = parseInt(mappedHex[1], 16);
+            const lo = parseInt(mappedHex[2], 16);
+            const ipv4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+            for (const pattern of CTGAPIClient.PRIVATE_IP_PATTERNS) {
+                if (pattern.test(ipv4)) {
                     throw new CTGAPIClientError("INVALID_URL", "Private/internal addresses are blocked");
                 }
             }

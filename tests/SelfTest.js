@@ -1129,6 +1129,50 @@ await CTGTest.init("IPv4-mapped IPv6 private 10.x blocked")
     .assert("threw INVALID_URL", (r) => r, "threw")
     .start(null, config);
 
+await CTGTest.init("IPv4-mapped IPv6 hex form loopback blocked (::ffff:7f00:1)")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://[::ffff:7f00:1]", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("IPv4-mapped IPv6 hex form 10.x blocked (::ffff:a00:1)")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://[::ffff:a00:1]", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("max_response_bytes zero throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { max_response_bytes: 0 }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("max_response_bytes negative throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { max_response_bytes: -1 }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("max_response_bytes float throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { max_response_bytes: 1.5 }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
 await CTGTest.init("private IPs not blocked when no SSRF config")
     .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/echo"))
     .assert("status 200", (r) => r.status, 200)

@@ -44,6 +44,9 @@ export default class CTGAPIClient {
         this._allowedSchemes = CTGAPIClient._validateStringArray(config.allowed_schemes, "allowed_schemes");
         this._allowedHosts = CTGAPIClient._validateStringArray(config.allowed_hosts, "allowed_hosts");
         this._maxResponseBytes = CTGAPIClient._validatePositiveInt(config.max_response_bytes, "max_response_bytes");
+        if (config.block_private_ips !== undefined && typeof config.block_private_ips !== "boolean") {
+            throw new TypeError("block_private_ips must be a boolean");
+        }
         this._blockPrivateIPs = config.block_private_ips !== undefined
             ? config.block_private_ips
             : (this._allowedSchemes !== null || this._allowedHosts !== null);

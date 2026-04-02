@@ -286,6 +286,14 @@ await CTGTest.init("allowed_hosts with non-string element throws TypeError")
     .assert("threw", (r) => r, "threw")
     .start(null, config);
 
+await CTGTest.init("block_private_ips non-boolean throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { block_private_ips: "false" }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
 // ── Timeout Validation ───────────────────────────────────────
 
 await CTGTest.init("timeout zero throws TypeError")

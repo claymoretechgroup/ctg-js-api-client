@@ -278,6 +278,22 @@ await CTGTest.init("timeout non-number throws TypeError")
     .assert("threw", (r) => r, "threw")
     .start(null, config);
 
+await CTGTest.init("timeout NaN throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { timeout: NaN }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("timeout Infinity throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { timeout: Infinity }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
 await CTGTest.init("timeout float accepted")
     .stage("create", () => CTGAPIClient.init(BASE_URL, { timeout: 1.5 }))
     .assert("timeout preserved", (c) => c.timeout, 1.5)
@@ -302,6 +318,22 @@ await CTGTest.init("static request timeout negative throws TypeError")
 await CTGTest.init("static request timeout non-number throws TypeError")
     .stage("attempt", async () => {
         try { await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, "fast"); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("static request timeout NaN throws TypeError")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, NaN); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("static request timeout Infinity throws TypeError")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, Infinity); return "no throw"; }
         catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
     })
     .assert("threw", (r) => r, "threw")
@@ -804,6 +836,24 @@ await CTGTest.init("upload cancellation via opts.signal")
         } finally { unlinkSync(filePath); }
     })
     .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("upload cancellation in-flight abort")
+    .stage("attempt", async () => {
+        const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
+        const filePath = join(tmpDir, "inflight.txt");
+        writeFileSync(filePath, "inflight data");
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 50);
+        try {
+            // Upload to /slow endpoint so request is in-flight when abort fires
+            await CTGAPIClient.init(BASE_URL).upload("/slow", filePath, { delay: "5000" }, "file", { signal: controller.signal });
+            return "no throw";
+        } catch (e) {
+            return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED" ? "threw" : `wrong: ${e.type}`;
+        } finally { unlinkSync(filePath); }
+    })
+    .assert("threw REQUEST_FAILED", (r) => r, "threw")
     .start(null, config);
 
 await CTGTest.init("upload multipart content-type set")

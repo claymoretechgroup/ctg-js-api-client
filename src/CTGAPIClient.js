@@ -34,12 +34,15 @@ export default class CTGAPIClient {
     // Config keys: timeout, headers, allowed_schemes, allowed_hosts, max_response_bytes, block_private_ips
     // NOTE: Trailing slash is stripped from baseUrl.
     constructor(baseUrl, config = {}) {
+        if (typeof baseUrl !== "string") {
+            throw new TypeError("baseUrl must be a string");
+        }
         this._baseUrl = baseUrl.replace(/\/+$/, "");
         this._timeout = config.timeout !== undefined ? config.timeout : CTGAPIClient.DEFAULT_TIMEOUT;
         this._headers = config.headers ? { ...config.headers } : {};
         this._token = null;
-        this._allowedSchemes = config.allowed_schemes || null;
-        this._allowedHosts = config.allowed_hosts || null;
+        this._allowedSchemes = CTGAPIClient._validateStringArray(config.allowed_schemes, "allowed_schemes");
+        this._allowedHosts = CTGAPIClient._validateStringArray(config.allowed_hosts, "allowed_hosts");
         this._maxResponseBytes = config.max_response_bytes || null;
         this._blockPrivateIPs = config.block_private_ips !== undefined
             ? config.block_private_ips
@@ -444,6 +447,22 @@ export default class CTGAPIClient {
         }
     }
 
+    // :: [STRING]|VOID, STRING -> [STRING]|VOID
+    // Validates that a config value is null/undefined or an array of strings.
+    // NOTE: Throws TypeError if value is present but not an array of strings.
+    static _validateStringArray(value, name) {
+        if (value === undefined || value === null) return null;
+        if (!Array.isArray(value)) {
+            throw new TypeError(`${name} must be an array of strings`);
+        }
+        for (const item of value) {
+            if (typeof item !== "string") {
+                throw new TypeError(`${name} must contain only strings`);
+            }
+        }
+        return value;
+    }
+
     // :: Error, STRING, STRING, BOOL -> ctgAPIClientError
     // Classifies a fetch error into a typed CTGAPIClientError.
     static _classifyError(err, url, method, timedOut) {
@@ -584,6 +603,16 @@ export default class CTGAPIClient {
         // fe80::/10 (link-local) — covers fe80 through febf
         if (/^fe[89ab]/.test(normalized)) {
             throw new CTGAPIClientError("INVALID_URL", "Private/internal addresses are blocked");
+        }
+
+        // IPv4-mapped IPv6 (::ffff:x.x.x.x) — extract IPv4 and re-check
+        const mappedMatch = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+        if (mappedMatch) {
+            for (const pattern of CTGAPIClient.PRIVATE_IP_PATTERNS) {
+                if (pattern.test(mappedMatch[1])) {
+                    throw new CTGAPIClientError("INVALID_URL", "Private/internal addresses are blocked");
+                }
+            }
         }
     }
 

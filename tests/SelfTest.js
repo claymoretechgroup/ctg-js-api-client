@@ -252,6 +252,40 @@ await CTGTest.init("init strips trailing slash")
     .assert("no trailing slash", (c) => c.baseUrl, BASE_URL)
     .start(null, config);
 
+// ── Constructor Validation ────────────────────────────────────
+
+await CTGTest.init("non-string baseUrl throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(123); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("allowed_hosts as string throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { allowed_hosts: "example.com" }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("allowed_schemes as string throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { allowed_schemes: "https" }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("allowed_hosts with non-string element throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { allowed_hosts: [123] }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
 // ── Timeout Validation ───────────────────────────────────────
 
 await CTGTest.init("timeout zero throws TypeError")
@@ -1069,6 +1103,26 @@ await CTGTest.init("IPv6 link-local febf blocked (fe80::/10 range)")
     .stage("attempt", async () => {
         try {
             await CTGAPIClient.init("http://[febf::1]", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("IPv4-mapped IPv6 loopback blocked")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://[::ffff:127.0.0.1]", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("IPv4-mapped IPv6 private 10.x blocked")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://[::ffff:10.0.0.1]", { block_private_ips: true }).GET("/echo");
             return "no throw";
         } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
     })

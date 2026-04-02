@@ -734,6 +734,31 @@ Per design doc Security Considerations:
 11. **Null byte sanitization** — header values are stripped of `\0` in addition to
     `\r` and `\n`, preventing null byte injection.
 
+### Security Properties Not Tested
+
+The following security properties are guaranteed by the implementation but are
+not covered by automated tests due to environment constraints:
+
+12. **TLS certificate verification** — Node.js native `fetch` enables TLS
+    verification by default. The implementation does not disable it and provides
+    no option to do so. Testing this requires a self-signed certificate server,
+    which adds infrastructure complexity (certificate generation, HTTPS server
+    setup) that is disproportionate for an in-process test suite. TLS behavior
+    should be validated as a CI-optional integration test against a dedicated
+    bad-cert endpoint if deployed in environments where TLS correctness is
+    critical. The spec guarantee is: requests to `https` URLs with invalid,
+    expired, or mismatched certificates must throw `SSL_ERROR`.
+
+13. **Proxy environment variable isolation** — Node.js native `fetch` does not
+    honor `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY` environment variables by
+    default. No additional code is needed to enforce this. Testing would require
+    setting env vars in-process, making a request, and verifying the request did
+    not route through a proxy — which is fragile (race conditions with other
+    tests, global process state mutation) and unreliable without a controlled
+    proxy server. If the HTTP transport layer is changed from native `fetch` to
+    a custom `undici` dispatcher or agent, this guarantee must be re-validated
+    as the new transport may honor proxy env vars.
+
 ---
 
 ## Conformance Test Traceability

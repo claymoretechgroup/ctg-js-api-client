@@ -223,7 +223,7 @@ _maxResponseBytes // INT|VOID — response size limit (optional)
 ```javascript
 // CONSTRUCTOR :: STRING, OBJECT? -> this
 // Creates a client with base URL and optional config.
-// Config keys: timeout, headers, allowed_schemes, allowed_hosts, max_response_bytes
+// Config keys: timeout, headers, allowed_schemes, allowed_hosts, max_response_bytes, block_private_ips
 // NOTE: Trailing slash is stripped from baseUrl.
 constructor(baseUrl, config = {})
 ```

@@ -438,6 +438,18 @@ await CTGTest.init("static request default User-Agent sent")
     .assert("has user-agent", (r) => r.body.headers["user-agent"].includes("CTGAPIClient"), true)
     .start(null, config);
 
+await CTGTest.init("static request nested file in array throws INVALID_BODY")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.request("POST", `${BASE_URL}/echo`, {
+                files: [new Blob(["data"])]
+            });
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_BODY" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_BODY", (r) => r, "threw")
+    .start(null, config);
+
 await CTGTest.init("static request body ignored for GET")
     .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`, { ignored: true }))
     .assert("no body sent", (r) => r.body.body === "" || r.body.body === null || r.body.body === undefined, true)
@@ -1037,6 +1049,26 @@ await CTGTest.init("IPv6 loopback blocked")
     .stage("attempt", async () => {
         try {
             await CTGAPIClient.init("http://[::1]", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("IPv6 link-local fe90 blocked (fe80::/10 range)")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://[fe90::1]", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("IPv6 link-local febf blocked (fe80::/10 range)")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://[febf::1]", { block_private_ips: true }).GET("/echo");
             return "no throw";
         } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
     })

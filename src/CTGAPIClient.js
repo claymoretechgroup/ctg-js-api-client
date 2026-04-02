@@ -293,7 +293,7 @@ export default class CTGAPIClient {
         try {
             parsedUrl = new URL(url);
         } catch {
-            throw new CTGAPIClientError("INVALID_URL", `Invalid URL: ${url}`);
+            throw new CTGAPIClientError("INVALID_URL", `Invalid URL: ${CTGAPIClient._redactUrl(url)}`);
         }
         if (parsedUrl.username || parsedUrl.password) {
             throw new CTGAPIClientError("INVALID_URL", "URLs with embedded credentials are not allowed");
@@ -476,7 +476,7 @@ export default class CTGAPIClient {
         }
 
         if (err.message && err.message.includes("Invalid URL")) {
-            return new CTGAPIClientError("INVALID_URL", `Invalid URL: ${url}`, data);
+            return new CTGAPIClientError("INVALID_URL", `Invalid URL: ${redactedUrl}`, data);
         }
 
         if (causeCode === "UND_ERR_CONNECT_TIMEOUT") {
@@ -546,11 +546,12 @@ export default class CTGAPIClient {
     // :: OBJECT, INT? -> VOID
     // Recursively checks for nested file references. Throws INVALID_BODY if found at depth > 0.
     static _rejectNestedFiles(body, depth = 0) {
-        for (const value of Object.values(body)) {
+        const values = Array.isArray(body) ? body : Object.values(body);
+        for (const value of values) {
             if (depth > 0 && CTGAPIClient._isFileRef(value)) {
                 throw new CTGAPIClientError("INVALID_BODY", "File references must be top-level body values");
             }
-            if (value && typeof value === "object" && !CTGAPIClient._isFileRef(value) && !Array.isArray(value)) {
+            if (value && typeof value === "object" && !CTGAPIClient._isFileRef(value)) {
                 CTGAPIClient._rejectNestedFiles(value, depth + 1);
             }
         }
@@ -575,8 +576,13 @@ export default class CTGAPIClient {
             throw new CTGAPIClientError("INVALID_URL", "Private/internal addresses are blocked");
         }
 
-        // fd00::/8 (unique local) and fe80::/10 (link-local)
-        if (normalized.startsWith("fd") || normalized.startsWith("fe80")) {
+        // fd00::/8 (unique local)
+        if (normalized.startsWith("fd")) {
+            throw new CTGAPIClientError("INVALID_URL", "Private/internal addresses are blocked");
+        }
+
+        // fe80::/10 (link-local) — covers fe80 through febf
+        if (/^fe[89ab]/.test(normalized)) {
             throw new CTGAPIClientError("INVALID_URL", "Private/internal addresses are blocked");
         }
     }

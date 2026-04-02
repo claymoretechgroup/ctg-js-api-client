@@ -286,6 +286,33 @@ await selfTest("timeout: float accepted", async () => {
     return client.timeout === 1.5;
 });
 
+await selfTest("timeout: static request zero throws TypeError", async () => {
+    try {
+        await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, 0);
+        return "no throw";
+    } catch (e) {
+        return e instanceof TypeError;
+    }
+});
+
+await selfTest("timeout: static request negative throws TypeError", async () => {
+    try {
+        await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, -5);
+        return "no throw";
+    } catch (e) {
+        return e instanceof TypeError;
+    }
+});
+
+await selfTest("timeout: static request non-number throws TypeError", async () => {
+    try {
+        await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, "fast");
+        return "no throw";
+    } catch (e) {
+        return e instanceof TypeError;
+    }
+});
+
 // ══════════════════════════════════════════════════════════════
 // CTGAPIClient — Static request()
 // ══════════════════════════════════════════════════════════════
@@ -395,19 +422,37 @@ await selfTest("static request: default User-Agent header sent", async () => {
 
 await selfTest("static request: body ignored for GET", async () => {
     const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`, { ignored: true });
-    // Body should not be sent — echo should show empty/no body
-    return r.status === 200 && r.body.method === "GET";
+    // Body not sent: echo body should be empty string (no JSON), no auto Content-Type
+    return r.status === 200
+        && r.body.method === "GET"
+        && (r.body.body === "" || r.body.body === null || r.body.body === undefined)
+        && r.body.headers["content-type"] === undefined;
 });
 
 await selfTest("static request: body ignored for DELETE", async () => {
     const r = await CTGAPIClient.request("DELETE", `${BASE_URL}/echo`, { ignored: true });
-    return r.status === 200 && r.body.method === "DELETE";
+    return r.status === 200
+        && r.body.method === "DELETE"
+        && (r.body.body === "" || r.body.body === null || r.body.body === undefined)
+        && r.body.headers["content-type"] === undefined;
 });
 
 await selfTest("static request: query params appended to URL with existing ?", async () => {
     const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo?existing=1`, {}, { added: "2" });
     return r.body.params.existing === "1"
         && r.body.params.added === "2";
+});
+
+await selfTest("static request: array param serialized as comma string", async () => {
+    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, { tags: [1, 2, 3] });
+    // URLSearchParams flattens arrays via toString(), producing "1,2,3"
+    return r.body.params.tags === "1,2,3";
+});
+
+await selfTest("static request: nested object param serialized as string", async () => {
+    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, { filter: { active: true } });
+    // URLSearchParams calls toString() on objects, producing "[object Object]"
+    return r.body.params.filter === "[object Object]";
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -796,6 +841,23 @@ await selfTest("upload: missing file throws REQUEST_FAILED", async () => {
     }
 });
 
+await selfTest("upload: cancellation via opts.signal", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
+    const filePath = join(tmpDir, "cancel.txt");
+    writeFileSync(filePath, "cancel me");
+    const controller = new AbortController();
+    controller.abort(); // pre-aborted
+    try {
+        const client = CTGAPIClient.init(BASE_URL);
+        await client.upload("/upload", filePath, {}, "file", { signal: controller.signal });
+        return "no throw";
+    } catch (e) {
+        return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED";
+    } finally {
+        unlinkSync(filePath);
+    }
+});
+
 // ══════════════════════════════════════════════════════════════
 // URL Normalization
 // ══════════════════════════════════════════════════════════════
@@ -1006,6 +1068,34 @@ await selfTest("cancellation: pre-aborted signal fails immediately", async () =>
 });
 
 await selfTest("cancellation: static request with signal", async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 50);
+    try {
+        await CTGAPIClient.request("GET", `${BASE_URL}/slow?delay=5000`, {}, {}, {}, 30, {
+            signal: controller.signal
+        });
+        return "no throw";
+    } catch (e) {
+        return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED";
+    }
+});
+
+await selfTest("cancellation: timeout fires before caller abort → TIMEOUT", async () => {
+    // Timeout at 50ms, caller abort at 200ms — timeout should win
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 200);
+    try {
+        await CTGAPIClient.request("GET", `${BASE_URL}/slow?delay=5000`, {}, {}, {}, 0.05, {
+            signal: controller.signal
+        });
+        return "no throw";
+    } catch (e) {
+        return e instanceof CTGAPIClientError && e.type === "TIMEOUT";
+    }
+});
+
+await selfTest("cancellation: caller abort fires before timeout → REQUEST_FAILED", async () => {
+    // Caller abort at 50ms, timeout at 30s — caller should win
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 50);
     try {

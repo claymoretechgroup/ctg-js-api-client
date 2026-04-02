@@ -1,6 +1,6 @@
 // Self-tests for ctg-js-api-client — error class + HTTP client
 //
-// Uses ctg-js-test as the test framework.
+// Uses ctg-js-test pipelines for all tests.
 // Starts an embedded node:http server for HTTP integration tests.
 // Server is always stopped on exit (pass, fail, or error).
 
@@ -30,1233 +30,1024 @@ try {
     process.exit(1);
 }
 
-// ── Test Harness ─────────────────────────────────────────────
+// ── Config ───────────────────────────────────────────────────
 
-process.stdout.write("=== ctg-js-api-client Self Test ===\n\n");
-
-let allPassed = true;
-
-// :: STRING, (() -> PROMISE(BOOL|STRING)) -> PROMISE(VOID)
-// Runs a single test, reporting PASS/FAIL/ERROR.
-async function selfTest(label, fn) {
-    try {
-        const result = await fn();
-        if (result === true) {
-            process.stdout.write(`  PASS  ${label}\n`);
-        } else {
-            process.stdout.write(`  FAIL  ${label}\n`);
-            if (typeof result === "string") {
-                process.stdout.write(`        ${result}\n`);
-            }
-            allPassed = false;
-        }
-    } catch (e) {
-        process.stdout.write(`  ERROR ${label}\n`);
-        process.stdout.write(`        ${e.constructor.name}: ${e.message}\n`);
-        allPassed = false;
-    }
-}
+const config = { output: "console", timeout: 0 };
 
 // ══════════════════════════════════════════════════════════════
-// CTGAPIClientError Tests
+// CTGAPIClientError — Construction
 // ══════════════════════════════════════════════════════════════
 
-// ── Construction ─────────────────────────────────────────────
+await CTGTest.init("construct with type name")
+    .stage("create", () => new CTGAPIClientError("TIMEOUT", "timed out", { url: "/test" }))
+    .assert("code is 1001", (e) => e.code, 1001)
+    .assert("type is TIMEOUT", (e) => e.type, "TIMEOUT")
+    .assert("msg is set", (e) => e.msg, "timed out")
+    .assert("data url", (e) => e.data.url, "/test")
+    .assert("name is CTGAPIClientError", (e) => e.name, "CTGAPIClientError")
+    .assert("is Error instance", (e) => e instanceof Error, true)
+    .start(null, config);
 
-await selfTest("error: construct with type name", async () => {
-    const e = new CTGAPIClientError("TIMEOUT", "request timed out", { url: "/test" });
-    return e.type === "TIMEOUT"
-        && e.code === 1001
-        && e.msg === "request timed out"
-        && e.data.url === "/test"
-        && e.name === "CTGAPIClientError"
-        && e.message === "request timed out"
-        && e instanceof Error;
-});
+await CTGTest.init("construct with integer code")
+    .stage("create", () => new CTGAPIClientError(1000, "refused"))
+    .assert("type is CONNECTION_FAILED", (e) => e.type, "CONNECTION_FAILED")
+    .assert("code is 1000", (e) => e.code, 1000)
+    .assert("msg is refused", (e) => e.msg, "refused")
+    .start(null, config);
 
-await selfTest("error: construct with integer code", async () => {
-    const e = new CTGAPIClientError(1000, "connection lost");
-    return e.type === "CONNECTION_FAILED"
-        && e.code === 1000
-        && e.msg === "connection lost";
-});
+await CTGTest.init("construct defaults msg to type name")
+    .stage("create", () => new CTGAPIClientError("DNS_FAILED"))
+    .assert("msg is type name", (e) => e.msg, "DNS_FAILED")
+    .assert("data is null", (e) => e.data, null)
+    .start(null, config);
 
-await selfTest("error: default msg to type name", async () => {
-    const e = new CTGAPIClientError("DNS_FAILED");
-    return e.msg === "DNS_FAILED"
-        && e.data === null;
-});
+await CTGTest.init("construct unknown type throws TypeError")
+    .stage("attempt", () => {
+        try { new CTGAPIClientError("BOGUS"); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw TypeError" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw TypeError")
+    .start(null, config);
 
-await selfTest("error: unknown type throws TypeError", async () => {
-    try {
-        new CTGAPIClientError("BOGUS");
-        return "no throw";
-    } catch (e) {
-        return e instanceof TypeError;
-    }
-});
+await CTGTest.init("construct unknown code throws TypeError")
+    .stage("attempt", () => {
+        try { new CTGAPIClientError(9999); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw TypeError" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw TypeError")
+    .start(null, config);
 
-await selfTest("error: unknown code throws TypeError", async () => {
-    try {
-        new CTGAPIClientError(9999);
-        return "no throw";
-    } catch (e) {
-        return e instanceof TypeError;
-    }
-});
+// ══════════════════════════════════════════════════════════════
+// CTGAPIClientError — Lookup
+// ══════════════════════════════════════════════════════════════
 
-// ── Lookup ───────────────────────────────────────────────────
+await CTGTest.init("lookup name to code")
+    .assert("TIMEOUT -> 1001", () => CTGAPIClientError.lookup("TIMEOUT"), 1001)
+    .start(null, config);
 
-await selfTest("lookup: name to code", async () =>
-    CTGAPIClientError.lookup("TIMEOUT") === 1001
-);
+await CTGTest.init("lookup code to name")
+    .assert("1001 -> TIMEOUT", () => CTGAPIClientError.lookup(1001), "TIMEOUT")
+    .start(null, config);
 
-await selfTest("lookup: code to name", async () =>
-    CTGAPIClientError.lookup(1001) === "TIMEOUT"
-);
+await CTGTest.init("lookup unknown string returns null")
+    .assert("returns null", () => CTGAPIClientError.lookup("BOGUS"), null)
+    .start(null, config);
 
-await selfTest("lookup: unknown string returns null", async () =>
-    CTGAPIClientError.lookup("BOGUS") === null
-);
+await CTGTest.init("lookup unknown integer returns null")
+    .assert("returns null", () => CTGAPIClientError.lookup(9999), null)
+    .start(null, config);
 
-await selfTest("lookup: unknown integer returns null", async () =>
-    CTGAPIClientError.lookup(9999) === null
-);
+await CTGTest.init("lookup all error codes")
+    .stage("collect", () => [
+        CTGAPIClientError.lookup("CONNECTION_FAILED"),
+        CTGAPIClientError.lookup("TIMEOUT"),
+        CTGAPIClientError.lookup("DNS_FAILED"),
+        CTGAPIClientError.lookup("SSL_ERROR"),
+        CTGAPIClientError.lookup("REQUEST_FAILED"),
+        CTGAPIClientError.lookup("INVALID_URL"),
+        CTGAPIClientError.lookup("INVALID_METHOD"),
+        CTGAPIClientError.lookup("INVALID_BODY"),
+        CTGAPIClientError.lookup("INVALID_HEADER"),
+        CTGAPIClientError.lookup("HTTP_ERROR"),
+    ])
+    .assert("all codes correct", (r) => JSON.stringify(r),
+        JSON.stringify([1000, 1001, 1002, 1003, 2000, 3000, 3001, 3002, 3003, 4000]))
+    .start(null, config);
 
-await selfTest("lookup: all error codes", async () => {
-    return CTGAPIClientError.lookup("CONNECTION_FAILED") === 1000
-        && CTGAPIClientError.lookup("TIMEOUT") === 1001
-        && CTGAPIClientError.lookup("DNS_FAILED") === 1002
-        && CTGAPIClientError.lookup("SSL_ERROR") === 1003
-        && CTGAPIClientError.lookup("REQUEST_FAILED") === 2000
-        && CTGAPIClientError.lookup("INVALID_URL") === 3000
-        && CTGAPIClientError.lookup("INVALID_METHOD") === 3001
-        && CTGAPIClientError.lookup("INVALID_BODY") === 3002
-        && CTGAPIClientError.lookup("INVALID_HEADER") === 3003
-        && CTGAPIClientError.lookup("HTTP_ERROR") === 4000;
-});
+// ══════════════════════════════════════════════════════════════
+// CTGAPIClientError — on/otherwise
+// ══════════════════════════════════════════════════════════════
 
-// ── on/otherwise Chaining ────────────────────────────────────
+await CTGTest.init("on matches type name")
+    .stage("handle", () => {
+        let matched = false;
+        new CTGAPIClientError("TIMEOUT").on("TIMEOUT", () => { matched = true; });
+        return matched;
+    })
+    .assert("handler called", (r) => r, true)
+    .start(null, config);
 
-await selfTest("on: matches type name", async () => {
-    let matched = false;
-    const e = new CTGAPIClientError("TIMEOUT", "timed out");
-    e.on("TIMEOUT", () => { matched = true; });
-    return matched;
-});
+await CTGTest.init("on matches by integer code")
+    .stage("handle", () => {
+        let matched = false;
+        new CTGAPIClientError("TIMEOUT").on(1001, () => { matched = true; });
+        return matched;
+    })
+    .assert("handler called", (r) => r, true)
+    .start(null, config);
 
-await selfTest("on: matches by integer code", async () => {
-    let matched = false;
-    const e = new CTGAPIClientError("TIMEOUT");
-    e.on(1001, () => { matched = true; });
-    return matched;
-});
+await CTGTest.init("on short circuits after first match")
+    .stage("handle", () => {
+        let first = false, second = false;
+        new CTGAPIClientError("TIMEOUT")
+            .on("TIMEOUT", () => { first = true; })
+            .on("TIMEOUT", () => { second = true; });
+        return { first, second };
+    })
+    .assert("first called", (r) => r.first, true)
+    .assert("second not called", (r) => r.second, false)
+    .start(null, config);
 
-await selfTest("on: short circuits after first match", async () => {
-    let first = false;
-    let second = false;
-    const e = new CTGAPIClientError("TIMEOUT");
-    e.on("TIMEOUT", () => { first = true; })
-     .on("TIMEOUT", () => { second = true; });
-    return first && !second;
-});
+await CTGTest.init("on skips non-matching type")
+    .stage("handle", () => {
+        let matched = false;
+        new CTGAPIClientError("TIMEOUT").on("DNS_FAILED", () => { matched = true; });
+        return matched;
+    })
+    .assert("handler not called", (r) => r, false)
+    .start(null, config);
 
-await selfTest("on: skips non-matching type", async () => {
-    let matched = false;
-    const e = new CTGAPIClientError("TIMEOUT");
-    e.on("DNS_FAILED", () => { matched = true; });
-    return !matched;
-});
-
-await selfTest("on: returns self for chaining", async () => {
-    const e = new CTGAPIClientError("TIMEOUT");
-    const result = e.on("DNS_FAILED", () => {});
-    return result === e;
-});
-
-await selfTest("otherwise: called when no on matched", async () => {
-    let called = false;
-    const e = new CTGAPIClientError("TIMEOUT");
-    e.on("DNS_FAILED", () => {})
-     .otherwise(() => { called = true; });
-    return called;
-});
-
-await selfTest("otherwise: not called when on matched", async () => {
-    let called = false;
-    const e = new CTGAPIClientError("TIMEOUT");
-    e.on("TIMEOUT", () => {})
-     .otherwise(() => { called = true; });
-    return !called;
-});
-
-await selfTest("on: unknown string type throws TypeError", async () => {
-    try {
+await CTGTest.init("on returns self for chaining")
+    .stage("check", () => {
         const e = new CTGAPIClientError("TIMEOUT");
-        e.on("NONEXISTENT", () => {});
-        return "no throw";
-    } catch (err) {
-        return err instanceof TypeError;
-    }
-});
+        return e.on("DNS_FAILED", () => {}) === e;
+    })
+    .assert("returns self", (r) => r, true)
+    .start(null, config);
 
-await selfTest("on: unknown integer code throws TypeError", async () => {
-    try {
-        const e = new CTGAPIClientError("TIMEOUT");
-        e.on(99999, () => {});
-        return "no throw";
-    } catch (err) {
-        return err instanceof TypeError;
-    }
-});
+await CTGTest.init("otherwise called when no on matched")
+    .stage("handle", () => {
+        let called = false;
+        new CTGAPIClientError("TIMEOUT")
+            .on("DNS_FAILED", () => {})
+            .otherwise(() => { called = true; });
+        return called;
+    })
+    .assert("otherwise called", (r) => r, true)
+    .start(null, config);
 
-// ── HTTP_ERROR Pattern ───────────────────────────────────────
+await CTGTest.init("otherwise not called when on matched")
+    .stage("handle", () => {
+        let called = false;
+        new CTGAPIClientError("TIMEOUT")
+            .on("TIMEOUT", () => {})
+            .otherwise(() => { called = true; });
+        return called;
+    })
+    .assert("otherwise not called", (r) => r, false)
+    .start(null, config);
 
-await selfTest("HTTP_ERROR: construct with response data", async () => {
-    const response = { status: 404, ok: false, body: { error: "Not found" } };
-    const e = new CTGAPIClientError("HTTP_ERROR", "Status: 404", response);
-    return e.type === "HTTP_ERROR"
-        && e.code === 4000
-        && e.data.status === 404
-        && e.data.ok === false;
-});
+await CTGTest.init("on unknown string type throws TypeError")
+    .stage("attempt", () => {
+        try {
+            new CTGAPIClientError("TIMEOUT").on("NONEXISTENT", () => {});
+            return "no throw";
+        } catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("HTTP_ERROR: chainable with transport errors", async () => {
-    let httpHandled = false;
-    const e = new CTGAPIClientError("HTTP_ERROR", "404", { status: 404 });
-    e.on("TIMEOUT", () => {})
-     .on("HTTP_ERROR", () => { httpHandled = true; })
-     .otherwise(() => {});
-    return httpHandled;
-});
+await CTGTest.init("on unknown integer code throws TypeError")
+    .stage("attempt", () => {
+        try {
+            new CTGAPIClientError("TIMEOUT").on(99999, () => {});
+            return "no throw";
+        } catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+// ══════════════════════════════════════════════════════════════
+// CTGAPIClientError — HTTP_ERROR Pattern
+// ══════════════════════════════════════════════════════════════
+
+await CTGTest.init("HTTP_ERROR construct with response data")
+    .stage("create", () => new CTGAPIClientError("HTTP_ERROR", "Status: 404", {
+        status: 404, ok: false, body: { error: "Not found" }
+    }))
+    .assert("type", (e) => e.type, "HTTP_ERROR")
+    .assert("code", (e) => e.code, 4000)
+    .assert("data status", (e) => e.data.status, 404)
+    .assert("data ok", (e) => e.data.ok, false)
+    .start(null, config);
+
+await CTGTest.init("HTTP_ERROR chainable with transport errors")
+    .stage("handle", () => {
+        let result = "unhandled";
+        new CTGAPIClientError("HTTP_ERROR", "404", { status: 404 })
+            .on("TIMEOUT", () => { result = "timeout"; })
+            .on("HTTP_ERROR", () => { result = "http_error"; })
+            .otherwise(() => { result = "other"; });
+        return result;
+    })
+    .assert("http handler fired", (r) => r, "http_error")
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // CTGAPIClient — Construction
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("init: static factory returns instance", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    return client instanceof CTGAPIClient;
-});
+await CTGTest.init("init static factory")
+    .stage("create", () => CTGAPIClient.init(BASE_URL))
+    .assert("returns instance", (c) => c instanceof CTGAPIClient, true)
+    .start(null, config);
 
-await selfTest("init: with config", async () => {
-    const client = CTGAPIClient.init(BASE_URL, {
-        timeout: 5,
-        headers: { "X-Custom": "value" }
-    });
-    return client.timeout === 5;
-});
+await CTGTest.init("init with config")
+    .stage("create", () => CTGAPIClient.init(BASE_URL, { timeout: 5, headers: { "X-Custom": "value" } }))
+    .assert("timeout set", (c) => c.timeout, 5)
+    .start(null, config);
 
-await selfTest("init: strips trailing slash from baseUrl", async () => {
-    const client = CTGAPIClient.init(BASE_URL + "/");
-    return client.baseUrl === BASE_URL;
-});
+await CTGTest.init("init strips trailing slash")
+    .stage("create", () => CTGAPIClient.init(BASE_URL + "/"))
+    .assert("no trailing slash", (c) => c.baseUrl, BASE_URL)
+    .start(null, config);
 
 // ── Timeout Validation ───────────────────────────────────────
 
-await selfTest("timeout: zero throws TypeError", async () => {
-    try {
-        CTGAPIClient.init(BASE_URL, { timeout: 0 });
-        return "no throw";
-    } catch (e) {
-        return e instanceof TypeError;
-    }
-});
+await CTGTest.init("timeout zero throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { timeout: 0 }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("timeout: negative throws TypeError", async () => {
-    try {
-        CTGAPIClient.init(BASE_URL, { timeout: -1 });
-        return "no throw";
-    } catch (e) {
-        return e instanceof TypeError;
-    }
-});
+await CTGTest.init("timeout negative throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { timeout: -1 }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("timeout: non-number throws TypeError", async () => {
-    try {
-        CTGAPIClient.init(BASE_URL, { timeout: "fast" });
-        return "no throw";
-    } catch (e) {
-        return e instanceof TypeError;
-    }
-});
+await CTGTest.init("timeout non-number throws TypeError")
+    .stage("attempt", () => {
+        try { CTGAPIClient.init(BASE_URL, { timeout: "fast" }); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("timeout: float accepted", async () => {
-    const client = CTGAPIClient.init(BASE_URL, { timeout: 1.5 });
-    return client.timeout === 1.5;
-});
+await CTGTest.init("timeout float accepted")
+    .stage("create", () => CTGAPIClient.init(BASE_URL, { timeout: 1.5 }))
+    .assert("timeout preserved", (c) => c.timeout, 1.5)
+    .start(null, config);
 
-await selfTest("timeout: static request zero throws TypeError", async () => {
-    try {
-        await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, 0);
-        return "no throw";
-    } catch (e) {
-        return e instanceof TypeError;
-    }
-});
+await CTGTest.init("static request timeout zero throws TypeError")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, 0); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("timeout: static request negative throws TypeError", async () => {
-    try {
-        await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, -5);
-        return "no throw";
-    } catch (e) {
-        return e instanceof TypeError;
-    }
-});
+await CTGTest.init("static request timeout negative throws TypeError")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, -5); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("timeout: static request non-number throws TypeError", async () => {
-    try {
-        await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, "fast");
-        return "no throw";
-    } catch (e) {
-        return e instanceof TypeError;
-    }
-});
+await CTGTest.init("static request timeout non-number throws TypeError")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {}, "fast"); return "no throw"; }
+        catch (e) { return e instanceof TypeError ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // CTGAPIClient — Static request()
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("static request: GET with full URL", async () => {
-    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`);
-    return r.status === 200
-        && r.ok === true
-        && r.body.method === "GET";
-});
+await CTGTest.init("static request GET")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`))
+    .assert("status 200", (r) => r.status, 200)
+    .assert("ok true", (r) => r.ok, true)
+    .assert("method GET", (r) => r.body.method, "GET")
+    .start(null, config);
 
-await selfTest("static request: POST with body", async () => {
-    const r = await CTGAPIClient.request("POST", `${BASE_URL}/echo`, { key: "value" });
-    return r.status === 200
-        && r.body.method === "POST"
-        && r.body.body.key === "value";
-});
+await CTGTest.init("static request POST with body")
+    .stage("execute", () => CTGAPIClient.request("POST", `${BASE_URL}/echo`, { key: "value" }))
+    .assert("method POST", (r) => r.body.method, "POST")
+    .assert("body sent", (r) => r.body.body.key, "value")
+    .start(null, config);
 
-await selfTest("static request: with query params", async () => {
-    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, { page: "1", limit: "10" });
-    return r.body.params.page === "1"
-        && r.body.params.limit === "10";
-});
+await CTGTest.init("static request with query params")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, { page: "1", limit: "10" }))
+    .assert("page param", (r) => r.body.params.page, "1")
+    .assert("limit param", (r) => r.body.params.limit, "10")
+    .start(null, config);
 
-await selfTest("static request: with headers", async () => {
-    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, { "X-Custom": "test" });
-    return r.body.headers["x-custom"] === "test";
-});
+await CTGTest.init("static request with headers")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, { "X-Custom": "test" }))
+    .assert("header sent", (r) => r.body.headers["x-custom"], "test")
+    .start(null, config);
 
-await selfTest("static request: case-insensitive method", async () => {
-    const r = await CTGAPIClient.request("post", `${BASE_URL}/echo`, { test: true });
-    return r.body.method === "POST";
-});
+await CTGTest.init("static request case-insensitive method")
+    .stage("execute", () => CTGAPIClient.request("post", `${BASE_URL}/echo`, { test: true }))
+    .assert("method uppercased", (r) => r.body.method, "POST")
+    .start(null, config);
 
-await selfTest("static request: empty method throws INVALID_METHOD", async () => {
-    try {
-        await CTGAPIClient.request("", `${BASE_URL}/echo`);
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "INVALID_METHOD";
-    }
-});
+await CTGTest.init("static request empty method throws INVALID_METHOD")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("", `${BASE_URL}/echo`); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_METHOD" ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("static request: invalid method throws INVALID_METHOD", async () => {
-    try {
-        await CTGAPIClient.request("BOGUS", `${BASE_URL}/echo`);
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "INVALID_METHOD";
-    }
-});
+await CTGTest.init("static request invalid method throws INVALID_METHOD")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("BOGUS", `${BASE_URL}/echo`); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_METHOD" ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("static request: HEAD is valid method", async () => {
-    const r = await CTGAPIClient.request("HEAD", `${BASE_URL}/echo`);
-    return r.status === 200;
-});
+await CTGTest.init("static request HEAD valid")
+    .stage("execute", () => CTGAPIClient.request("HEAD", `${BASE_URL}/echo`))
+    .assert("status 200", (r) => r.status, 200)
+    .start(null, config);
 
-await selfTest("static request: OPTIONS is valid method", async () => {
-    const r = await CTGAPIClient.request("OPTIONS", `${BASE_URL}/echo`);
-    return r.status === 200;
-});
+await CTGTest.init("static request OPTIONS valid")
+    .stage("execute", () => CTGAPIClient.request("OPTIONS", `${BASE_URL}/echo`))
+    .assert("status 200", (r) => r.status, 200)
+    .start(null, config);
 
-await selfTest("static request: invalid header name throws INVALID_HEADER", async () => {
-    try {
-        await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, { "Bad Name": "value" });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "INVALID_HEADER";
-    }
-});
+await CTGTest.init("static request invalid header name throws INVALID_HEADER")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, { "Bad Name": "value" }); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_HEADER" ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("static request: CRLF in header name throws INVALID_HEADER", async () => {
-    try {
-        await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, { "Name\r\n": "value" });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "INVALID_HEADER";
-    }
-});
+await CTGTest.init("static request CRLF in header name throws INVALID_HEADER")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, { "Name\r\n": "value" }); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_HEADER" ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("static request: CRLF stripped from header values", async () => {
-    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {
+await CTGTest.init("static request CRLF stripped from header values")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {
         "X-Test": "safe\r\nX-Injected: evil"
-    });
-    // The value should have \r\n stripped, so no injection
-    const val = r.body.headers["x-test"];
-    return typeof val === "string" && !val.includes("\n");
-});
+    }))
+    .assert("no injection", (r) => !r.body.headers["x-test"].includes("\n"), true)
+    .start(null, config);
 
-await selfTest("static request: Content-Type auto-set for JSON body", async () => {
-    const r = await CTGAPIClient.request("POST", `${BASE_URL}/echo`, { data: "test" });
-    return r.body.headers["content-type"] === "application/json";
-});
+await CTGTest.init("static request Content-Type auto-set for JSON")
+    .stage("execute", () => CTGAPIClient.request("POST", `${BASE_URL}/echo`, { data: "test" }))
+    .assert("content-type json", (r) => r.body.headers["content-type"], "application/json")
+    .start(null, config);
 
-await selfTest("static request: explicit content-type not duplicated", async () => {
-    const r = await CTGAPIClient.request("POST", `${BASE_URL}/echo`, { data: "test" }, {}, {
+await CTGTest.init("static request explicit content-type not duplicated")
+    .stage("execute", () => CTGAPIClient.request("POST", `${BASE_URL}/echo`, { data: "test" }, {}, {
         "content-type": "text/plain"
-    });
-    return r.body.headers["content-type"] === "text/plain";
-});
+    }))
+    .assert("caller content-type preserved", (r) => r.body.headers["content-type"], "text/plain")
+    .start(null, config);
 
-await selfTest("static request: default User-Agent header sent", async () => {
-    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`);
-    return r.body.headers["user-agent"] !== undefined
-        && r.body.headers["user-agent"].includes("CTGAPIClient");
-});
+await CTGTest.init("static request default User-Agent sent")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`))
+    .assert("has user-agent", (r) => r.body.headers["user-agent"].includes("CTGAPIClient"), true)
+    .start(null, config);
 
-await selfTest("static request: body ignored for GET", async () => {
-    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`, { ignored: true });
-    // Body not sent: echo body should be empty string (no JSON), no auto Content-Type
-    return r.status === 200
-        && r.body.method === "GET"
-        && (r.body.body === "" || r.body.body === null || r.body.body === undefined)
-        && r.body.headers["content-type"] === undefined;
-});
+await CTGTest.init("static request body ignored for GET")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`, { ignored: true }))
+    .assert("no body sent", (r) => r.body.body === "" || r.body.body === null || r.body.body === undefined, true)
+    .assert("no content-type", (r) => r.body.headers["content-type"] === undefined, true)
+    .start(null, config);
 
-await selfTest("static request: body ignored for DELETE", async () => {
-    const r = await CTGAPIClient.request("DELETE", `${BASE_URL}/echo`, { ignored: true });
-    return r.status === 200
-        && r.body.method === "DELETE"
-        && (r.body.body === "" || r.body.body === null || r.body.body === undefined)
-        && r.body.headers["content-type"] === undefined;
-});
+await CTGTest.init("static request body ignored for DELETE")
+    .stage("execute", () => CTGAPIClient.request("DELETE", `${BASE_URL}/echo`, { ignored: true }))
+    .assert("no body sent", (r) => r.body.body === "" || r.body.body === null || r.body.body === undefined, true)
+    .assert("no content-type", (r) => r.body.headers["content-type"] === undefined, true)
+    .start(null, config);
 
-await selfTest("static request: query params appended to URL with existing ?", async () => {
-    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo?existing=1`, {}, { added: "2" });
-    return r.body.params.existing === "1"
-        && r.body.params.added === "2";
-});
+await CTGTest.init("static request query params with existing ?")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo?existing=1`, {}, { added: "2" }))
+    .assert("existing param", (r) => r.body.params.existing, "1")
+    .assert("added param", (r) => r.body.params.added, "2")
+    .start(null, config);
 
-await selfTest("static request: array param serialized as comma string", async () => {
-    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, { tags: [1, 2, 3] });
-    // URLSearchParams flattens arrays via toString(), producing "1,2,3"
-    return r.body.params.tags === "1,2,3";
-});
+await CTGTest.init("static request array param serialized as comma string")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, { tags: [1, 2, 3] }))
+    .assert("array flattened", (r) => r.body.params.tags, "1,2,3")
+    .start(null, config);
 
-await selfTest("static request: nested object param serialized as string", async () => {
-    const r = await CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, { filter: { active: true } });
-    // URLSearchParams calls toString() on objects, producing "[object Object]"
-    return r.body.params.filter === "[object Object]";
-});
+await CTGTest.init("static request nested object param serialized as string")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, { filter: { active: true } }))
+    .assert("object stringified", (r) => r.body.params.filter, "[object Object]")
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // CTGAPIClient — Instance HTTP Methods
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("GET: basic request", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/echo");
-    return r.status === 200
-        && r.ok === true
-        && r.body.method === "GET";
-});
+await CTGTest.init("GET basic")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/echo"))
+    .assert("status 200", (r) => r.status, 200)
+    .assert("ok", (r) => r.ok, true)
+    .assert("method", (r) => r.body.method, "GET")
+    .start(null, config);
 
-await selfTest("GET: with query parameters", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/echo", { role: "admin", active: "true" });
-    return r.body.params.role === "admin"
-        && r.body.params.active === "true";
-});
+await CTGTest.init("GET with query params")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/echo", { role: "admin", active: "true" }))
+    .assert("role param", (r) => r.body.params.role, "admin")
+    .assert("active param", (r) => r.body.params.active, "true")
+    .start(null, config);
 
-await selfTest("GET: with per-request headers", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/echo", {}, { "X-Request-Only": "yes" });
-    return r.body.headers["x-request-only"] === "yes";
-});
+await CTGTest.init("GET with per-request headers")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/echo", {}, { "X-Request-Only": "yes" }))
+    .assert("header sent", (r) => r.body.headers["x-request-only"], "yes")
+    .start(null, config);
 
-await selfTest("GET: JSON endpoint", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/json");
-    return Array.isArray(r.body.users)
-        && r.body.users.length === 3
-        && r.body.users[0].name === "Alice";
-});
+await CTGTest.init("GET JSON endpoint")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/json"))
+    .assert("is array", (r) => Array.isArray(r.body.users), true)
+    .assert("count", (r) => r.body.users.length, 3)
+    .assert("first user", (r) => r.body.users[0].name, "Alice")
+    .start(null, config);
 
-await selfTest("POST: JSON body", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.POST("/echo", { name: "test" });
-    return r.body.method === "POST"
-        && r.body.body.name === "test";
-});
+await CTGTest.init("POST JSON body")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).POST("/echo", { name: "test" }))
+    .assert("method", (r) => r.body.method, "POST")
+    .assert("body", (r) => r.body.body.name, "test")
+    .start(null, config);
 
-await selfTest("POST: with query params and body", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.POST("/echo", { data: "x" }, { page: "2" });
-    return r.body.body.data === "x"
-        && r.body.params.page === "2";
-});
+await CTGTest.init("POST with query params and body")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).POST("/echo", { data: "x" }, { page: "2" }))
+    .assert("body", (r) => r.body.body.data, "x")
+    .assert("param", (r) => r.body.params.page, "2")
+    .start(null, config);
 
-await selfTest("PUT: JSON body", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.PUT("/echo", { updated: true });
-    return r.body.method === "PUT"
-        && r.body.body.updated === true;
-});
+await CTGTest.init("PUT JSON body")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).PUT("/echo", { updated: true }))
+    .assert("method", (r) => r.body.method, "PUT")
+    .assert("body", (r) => r.body.body.updated, true)
+    .start(null, config);
 
-await selfTest("PATCH: JSON body", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.PATCH("/echo", { field: "value" });
-    return r.body.method === "PATCH"
-        && r.body.body.field === "value";
-});
+await CTGTest.init("PATCH JSON body")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).PATCH("/echo", { field: "value" }))
+    .assert("method", (r) => r.body.method, "PATCH")
+    .assert("body", (r) => r.body.body.field, "value")
+    .start(null, config);
 
-await selfTest("DELETE: basic", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.DELETE("/echo");
-    return r.body.method === "DELETE";
-});
+await CTGTest.init("DELETE basic")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).DELETE("/echo"))
+    .assert("method", (r) => r.body.method, "DELETE")
+    .start(null, config);
 
-await selfTest("DELETE: with query params", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.DELETE("/echo", { id: "42" });
-    return r.body.params.id === "42";
-});
+await CTGTest.init("DELETE with query params")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).DELETE("/echo", { id: "42" }))
+    .assert("param", (r) => r.body.params.id, "42")
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // Response Structure
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("response: has all required keys", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/echo");
-    return "status" in r
-        && "ok" in r
-        && "headers" in r
-        && "body" in r
-        && typeof r.status === "number"
-        && typeof r.ok === "boolean"
-        && typeof r.headers === "object";
-});
+await CTGTest.init("response has all required keys")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/echo"))
+    .assert("has status", (r) => typeof r.status, "number")
+    .assert("has ok", (r) => typeof r.ok, "boolean")
+    .assert("has headers", (r) => typeof r.headers, "object")
+    .assert("has body", (r) => "body" in r, true)
+    .start(null, config);
 
 // ── Status Codes ─────────────────────────────────────────────
 
-await selfTest("status: 200 is ok", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/status", { code: "200" });
-    return r.status === 200 && r.ok === true;
-});
+await CTGTest.init("status 200 ok")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/status", { code: "200" }))
+    .assert("status", (r) => r.status, 200)
+    .assert("ok", (r) => r.ok, true)
+    .start(null, config);
 
-await selfTest("status: 201 is ok", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/status", { code: "201" });
-    return r.status === 201 && r.ok === true;
-});
+await CTGTest.init("status 201 ok")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/status", { code: "201" }))
+    .assert("status", (r) => r.status, 201)
+    .assert("ok", (r) => r.ok, true)
+    .start(null, config);
 
-await selfTest("status: 400 is not ok", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/status", { code: "400" });
-    return r.status === 400 && r.ok === false;
-});
+await CTGTest.init("status 400 not ok")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/status", { code: "400" }))
+    .assert("status", (r) => r.status, 400)
+    .assert("not ok", (r) => r.ok, false)
+    .start(null, config);
 
-await selfTest("status: 401 is not ok", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/status", { code: "401" });
-    return r.status === 401 && r.ok === false;
-});
+await CTGTest.init("status 404 not ok")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/status", { code: "404" }))
+    .assert("status", (r) => r.status, 404)
+    .assert("not ok", (r) => r.ok, false)
+    .start(null, config);
 
-await selfTest("status: 404 is not ok", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/status", { code: "404" });
-    return r.status === 404 && r.ok === false;
-});
+await CTGTest.init("status 500 not ok")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/status", { code: "500" }))
+    .assert("status", (r) => r.status, 500)
+    .assert("not ok", (r) => r.ok, false)
+    .start(null, config);
 
-await selfTest("status: 500 is not ok", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/status", { code: "500" });
-    return r.status === 500 && r.ok === false;
-});
-
-await selfTest("status: 301 is not ok (redirect not followed)", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/redirect");
-    return r.status === 302
-        && r.ok === false
-        && r.headers["location"] !== undefined;
-});
+await CTGTest.init("status 302 not ok (redirect not followed)")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/redirect"))
+    .assert("status 302", (r) => r.status, 302)
+    .assert("not ok", (r) => r.ok, false)
+    .assert("location header", (r) => typeof r.headers["location"], "string")
+    .start(null, config);
 
 // ── Response Body Parsing ────────────────────────────────────
 
-await selfTest("response: JSON body parsed", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/json");
-    return typeof r.body === "object" && r.body !== null;
-});
+await CTGTest.init("response JSON body parsed")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/json"))
+    .assert("is object", (r) => typeof r.body, "object")
+    .start(null, config);
 
-await selfTest("response: non-JSON body returns raw string", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/redirect");
-    // redirect returns text/plain "redirecting"
-    return typeof r.body === "string" && r.body === "redirecting";
-});
+await CTGTest.init("response non-JSON body returns raw string")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/redirect"))
+    .assert("is string", (r) => typeof r.body, "string")
+    .assert("raw content", (r) => r.body, "redirecting")
+    .start(null, config);
 
-await selfTest("response: empty body returns empty string", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/status", { code: "204" });
-    return r.body === "";
-});
+await CTGTest.init("response empty body returns empty string")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/status", { code: "204" }))
+    .assert("empty string", (r) => r.body, "")
+    .start(null, config);
 
 // ── Response Header Parsing ──────────────────────────────────
 
-await selfTest("response: headers are lowercase keyed", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/echo");
-    return "content-type" in r.headers;
-});
+await CTGTest.init("response headers lowercase")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/echo"))
+    .assert("content-type lowercase", (r) => "content-type" in r.headers, true)
+    .start(null, config);
 
-await selfTest("response: duplicate headers comma-joined", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/headers");
-    return typeof r.headers["x-duplicate"] === "string"
+await CTGTest.init("response duplicate headers comma-joined")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/headers"))
+    .assert("x-duplicate joined", (r) =>
+        typeof r.headers["x-duplicate"] === "string"
         && r.headers["x-duplicate"].includes("value1")
-        && r.headers["x-duplicate"].includes("value2");
-});
+        && r.headers["x-duplicate"].includes("value2"), true)
+    .start(null, config);
 
-await selfTest("response: set-cookie collected as array", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/headers");
-    return Array.isArray(r.headers["set-cookie"])
-        && r.headers["set-cookie"].length === 2
-        && r.headers["set-cookie"][0].includes("session=abc")
-        && r.headers["set-cookie"][1].includes("theme=dark");
-});
+await CTGTest.init("response set-cookie collected as array")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/headers"))
+    .assert("is array", (r) => Array.isArray(r.headers["set-cookie"]), true)
+    .assert("count", (r) => r.headers["set-cookie"].length, 2)
+    .assert("session cookie", (r) => r.headers["set-cookie"][0].includes("session=abc"), true)
+    .assert("theme cookie", (r) => r.headers["set-cookie"][1].includes("theme=dark"), true)
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // Authentication
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("auth: no token returns 401", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/auth");
-    return r.status === 401;
-});
+await CTGTest.init("auth no token returns 401")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/auth"))
+    .assert("status 401", (r) => r.status, 401)
+    .start(null, config);
 
-await selfTest("auth: wrong token returns 403", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setToken("wrong-token");
-    const r = await client.GET("/auth");
-    return r.status === 403;
-});
+await CTGTest.init("auth wrong token returns 403")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).setToken("wrong-token").GET("/auth"))
+    .assert("status 403", (r) => r.status, 403)
+    .start(null, config);
 
-await selfTest("auth: valid token returns 200", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345");
-    const r = await client.GET("/auth");
-    return r.status === 200
-        && r.body.authenticated === true;
-});
+await CTGTest.init("auth valid token returns 200")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345").GET("/auth"))
+    .assert("status 200", (r) => r.status, 200)
+    .assert("authenticated", (r) => r.body.authenticated, true)
+    .start(null, config);
 
-await selfTest("auth: token persists across requests", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345");
-    const r1 = await client.GET("/auth");
-    const r2 = await client.GET("/auth");
-    return r1.status === 200 && r2.status === 200;
-});
+await CTGTest.init("auth token persists across requests")
+    .stage("execute", async () => {
+        const client = CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345");
+        const r1 = await client.GET("/auth");
+        const r2 = await client.GET("/auth");
+        return { s1: r1.status, s2: r2.status };
+    })
+    .assert("first ok", (r) => r.s1, 200)
+    .assert("second ok", (r) => r.s2, 200)
+    .start(null, config);
 
-await selfTest("auth: clearToken removes auth", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345");
-    const r1 = await client.GET("/auth");
-    client.clearToken();
-    const r2 = await client.GET("/auth");
-    return r1.status === 200 && r2.status === 401;
-});
+await CTGTest.init("auth clearToken removes auth")
+    .stage("execute", async () => {
+        const client = CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345");
+        const r1 = await client.GET("/auth");
+        client.clearToken();
+        const r2 = await client.GET("/auth");
+        return { s1: r1.status, s2: r2.status };
+    })
+    .assert("before clear", (r) => r.s1, 200)
+    .assert("after clear", (r) => r.s2, 401)
+    .start(null, config);
 
-await selfTest("auth: getToken returns current token", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const before = client.getToken();
-    client.setToken("abc");
-    const during = client.getToken();
-    client.clearToken();
-    const after = client.getToken();
-    return before === null && during === "abc" && after === null;
-});
+await CTGTest.init("auth getToken lifecycle")
+    .stage("check", () => {
+        const client = CTGAPIClient.init(BASE_URL);
+        const before = client.getToken();
+        client.setToken("abc");
+        const during = client.getToken();
+        client.clearToken();
+        const after = client.getToken();
+        return { before, during, after };
+    })
+    .assert("before null", (r) => r.before, null)
+    .assert("during set", (r) => r.during, "abc")
+    .assert("after null", (r) => r.after, null)
+    .start(null, config);
 
-await selfTest("auth: token sent with POST", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345");
-    const r = await client.POST("/auth", { data: "test" });
-    return r.status === 200 && r.body.authenticated === true;
-});
+await CTGTest.init("auth token sent with POST")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345").POST("/auth", { data: "test" }))
+    .assert("authenticated", (r) => r.body.authenticated, true)
+    .start(null, config);
 
-await selfTest("auth: per-request Authorization overrides token", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345");
-    const r = await client.GET("/echo", {}, { "Authorization": "Basic xyz" });
-    return r.body.headers["authorization"] === "Basic xyz";
-});
+await CTGTest.init("auth per-request Authorization overrides token")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).setToken("test-jwt-token-12345")
+        .GET("/echo", {}, { "Authorization": "Basic xyz" }))
+    .assert("override applied", (r) => r.body.headers["authorization"], "Basic xyz")
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // Header Management
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("headers: setHeader sends custom header", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setHeader("X-Custom", "test-value");
-    const r = await client.GET("/echo");
-    return r.body.headers["x-custom"] === "test-value";
-});
+await CTGTest.init("headers setHeader sends custom header")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).setHeader("X-Custom", "test-value").GET("/echo"))
+    .assert("header sent", (r) => r.body.headers["x-custom"], "test-value")
+    .start(null, config);
 
-await selfTest("headers: setHeaders sends multiple", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setHeaders({
-        "X-First": "one",
-        "X-Second": "two"
-    });
-    const r = await client.GET("/echo");
-    return r.body.headers["x-first"] === "one"
-        && r.body.headers["x-second"] === "two";
-});
+await CTGTest.init("headers setHeaders sends multiple")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL)
+        .setHeaders({ "X-First": "one", "X-Second": "two" }).GET("/echo"))
+    .assert("first", (r) => r.body.headers["x-first"], "one")
+    .assert("second", (r) => r.body.headers["x-second"], "two")
+    .start(null, config);
 
-await selfTest("headers: removeHeader removes header", async () => {
-    const client = CTGAPIClient.init(BASE_URL)
-        .setHeader("X-Remove-Me", "present")
-        .removeHeader("X-Remove-Me");
-    const r = await client.GET("/echo");
-    return r.body.headers["x-remove-me"] === undefined;
-});
+await CTGTest.init("headers removeHeader removes header")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL)
+        .setHeader("X-Remove-Me", "present").removeHeader("X-Remove-Me").GET("/echo"))
+    .assert("removed", (r) => r.body.headers["x-remove-me"] === undefined, true)
+    .start(null, config);
 
-await selfTest("headers: case-insensitive overwrite", async () => {
-    const client = CTGAPIClient.init(BASE_URL)
-        .setHeader("X-Custom", "first")
-        .setHeader("x-custom", "second");
-    const r = await client.GET("/echo");
-    return r.body.headers["x-custom"] === "second";
-});
+await CTGTest.init("headers case-insensitive overwrite")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL)
+        .setHeader("X-Custom", "first").setHeader("x-custom", "second").GET("/echo"))
+    .assert("second wins", (r) => r.body.headers["x-custom"], "second")
+    .start(null, config);
 
-await selfTest("headers: case-insensitive remove", async () => {
-    const client = CTGAPIClient.init(BASE_URL)
-        .setHeader("X-Custom", "value")
-        .removeHeader("x-custom");
-    const r = await client.GET("/echo");
-    return r.body.headers["x-custom"] === undefined;
-});
+await CTGTest.init("headers case-insensitive remove")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL)
+        .setHeader("X-Custom", "value").removeHeader("x-custom").GET("/echo"))
+    .assert("removed", (r) => r.body.headers["x-custom"] === undefined, true)
+    .start(null, config);
 
-await selfTest("headers: default Authorization overrides automatic token", async () => {
-    const client = CTGAPIClient.init(BASE_URL)
-        .setToken("test-jwt-token-12345")
-        .setHeader("Authorization", "Basic xyz");
-    const r = await client.GET("/echo");
-    return r.body.headers["authorization"] === "Basic xyz";
-});
+await CTGTest.init("headers default Authorization overrides automatic token")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL)
+        .setToken("test-jwt-token-12345").setHeader("Authorization", "Basic xyz").GET("/echo"))
+    .assert("default wins", (r) => r.body.headers["authorization"], "Basic xyz")
+    .start(null, config);
 
 // ── Per-Request Header Merge ─────────────────────────────────
 
-await selfTest("per-request headers: override default for one call", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setHeader("X-Default", "default");
-    const r1 = await client.GET("/echo", {}, { "X-Default": "override" });
-    const r2 = await client.GET("/echo");
-    return r1.body.headers["x-default"] === "override"
-        && r2.body.headers["x-default"] === "default";
-});
+await CTGTest.init("per-request headers override default for one call")
+    .stage("execute", async () => {
+        const client = CTGAPIClient.init(BASE_URL).setHeader("X-Default", "default");
+        const r1 = await client.GET("/echo", {}, { "X-Default": "override" });
+        const r2 = await client.GET("/echo");
+        return { first: r1.body.headers["x-default"], second: r2.body.headers["x-default"] };
+    })
+    .assert("override", (r) => r.first, "override")
+    .assert("reverts", (r) => r.second, "default")
+    .start(null, config);
 
-await selfTest("per-request headers: supplement defaults", async () => {
-    const client = CTGAPIClient.init(BASE_URL).setHeader("X-Default", "keep");
-    const r = await client.GET("/echo", {}, { "X-Extra": "added" });
-    return r.body.headers["x-default"] === "keep"
-        && r.body.headers["x-extra"] === "added";
-});
+await CTGTest.init("per-request headers supplement defaults")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL)
+        .setHeader("X-Default", "keep").GET("/echo", {}, { "X-Extra": "added" }))
+    .assert("default kept", (r) => r.body.headers["x-default"], "keep")
+    .assert("extra added", (r) => r.body.headers["x-extra"], "added")
+    .start(null, config);
 
-await selfTest("per-request headers: do not persist", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    await client.GET("/echo", {}, { "X-Temp": "once" });
-    const r = await client.GET("/echo");
-    return r.body.headers["x-temp"] === undefined;
-});
+await CTGTest.init("per-request headers do not persist")
+    .stage("execute", async () => {
+        const client = CTGAPIClient.init(BASE_URL);
+        await client.GET("/echo", {}, { "X-Temp": "once" });
+        const r = await client.GET("/echo");
+        return r.body.headers["x-temp"];
+    })
+    .assert("not persisted", (r) => r === undefined, true)
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // File Upload
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("upload: file via path", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
-    const filePath = join(tmpDir, "test.txt");
-    writeFileSync(filePath, "hello world");
-    try {
-        const client = CTGAPIClient.init(BASE_URL);
-        const r = await client.upload("/upload", filePath);
-        return r.status === 200
-            && r.body.files.file !== undefined
-            && r.body.files.file.name === "test.txt"
-            && r.body.files.file.size > 0;
-    } finally {
-        unlinkSync(filePath);
-    }
-});
+await CTGTest.init("upload file via path")
+    .stage("execute", async () => {
+        const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
+        const filePath = join(tmpDir, "test.txt");
+        writeFileSync(filePath, "hello world");
+        try {
+            return await CTGAPIClient.init(BASE_URL).upload("/upload", filePath);
+        } finally { unlinkSync(filePath); }
+    })
+    .assert("status 200", (r) => r.status, 200)
+    .assert("file received", (r) => r.body.files.file !== undefined, true)
+    .assert("filename", (r) => r.body.files.file.name, "test.txt")
+    .assert("has size", (r) => r.body.files.file.size > 0, true)
+    .start(null, config);
 
-await selfTest("upload: custom field name", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
-    const filePath = join(tmpDir, "photo.jpg");
-    writeFileSync(filePath, "fake image data");
-    try {
-        const client = CTGAPIClient.init(BASE_URL);
-        const r = await client.upload("/upload", filePath, {}, "avatar");
-        return r.status === 200
-            && r.body.files.avatar !== undefined
-            && r.body.files.avatar.name === "photo.jpg";
-    } finally {
-        unlinkSync(filePath);
-    }
-});
+await CTGTest.init("upload custom field name")
+    .stage("execute", async () => {
+        const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
+        const filePath = join(tmpDir, "photo.jpg");
+        writeFileSync(filePath, "fake image");
+        try {
+            return await CTGAPIClient.init(BASE_URL).upload("/upload", filePath, {}, "avatar");
+        } finally { unlinkSync(filePath); }
+    })
+    .assert("field name", (r) => r.body.files.avatar !== undefined, true)
+    .assert("filename", (r) => r.body.files.avatar.name, "photo.jpg")
+    .start(null, config);
 
-await selfTest("upload: with additional fields", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
-    const filePath = join(tmpDir, "doc.pdf");
-    writeFileSync(filePath, "pdf content");
-    try {
-        const client = CTGAPIClient.init(BASE_URL);
-        const r = await client.upload("/upload", filePath, { title: "My Doc", category: "reports" });
-        return r.status === 200
-            && r.body.files.file !== undefined
-            && r.body.fields.title === "My Doc"
-            && r.body.fields.category === "reports";
-    } finally {
-        unlinkSync(filePath);
-    }
-});
+await CTGTest.init("upload with additional fields")
+    .stage("execute", async () => {
+        const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
+        const filePath = join(tmpDir, "doc.pdf");
+        writeFileSync(filePath, "pdf content");
+        try {
+            return await CTGAPIClient.init(BASE_URL).upload("/upload", filePath, { title: "My Doc", category: "reports" });
+        } finally { unlinkSync(filePath); }
+    })
+    .assert("file received", (r) => r.body.files.file !== undefined, true)
+    .assert("title field", (r) => r.body.fields.title, "My Doc")
+    .assert("category field", (r) => r.body.fields.category, "reports")
+    .start(null, config);
 
-await selfTest("upload: Buffer source", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.upload("/upload", Buffer.from("buffer content"));
-    return r.status === 200
-        && r.body.files.file !== undefined
-        && r.body.files.file.size > 0;
-});
+await CTGTest.init("upload Buffer source")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).upload("/upload", Buffer.from("buffer content")))
+    .assert("status 200", (r) => r.status, 200)
+    .assert("file received", (r) => r.body.files.file !== undefined, true)
+    .assert("has size", (r) => r.body.files.file.size > 0, true)
+    .start(null, config);
 
-await selfTest("upload: missing file throws REQUEST_FAILED", async () => {
-    try {
-        const client = CTGAPIClient.init(BASE_URL);
-        await client.upload("/upload", "/nonexistent/file.txt");
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED";
-    }
-});
+await CTGTest.init("upload missing file throws REQUEST_FAILED")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.init(BASE_URL).upload("/upload", "/nonexistent/file.txt"); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED" ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("upload: cancellation via opts.signal", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
-    const filePath = join(tmpDir, "cancel.txt");
-    writeFileSync(filePath, "cancel me");
-    const controller = new AbortController();
-    controller.abort(); // pre-aborted
-    try {
-        const client = CTGAPIClient.init(BASE_URL);
-        await client.upload("/upload", filePath, {}, "file", { signal: controller.signal });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED";
-    } finally {
-        unlinkSync(filePath);
-    }
-});
+await CTGTest.init("upload cancellation via opts.signal")
+    .stage("attempt", async () => {
+        const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
+        const filePath = join(tmpDir, "cancel.txt");
+        writeFileSync(filePath, "cancel me");
+        const controller = new AbortController();
+        controller.abort();
+        try {
+            await CTGAPIClient.init(BASE_URL).upload("/upload", filePath, {}, "file", { signal: controller.signal });
+            return "no throw";
+        } catch (e) {
+            return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED" ? "threw" : "wrong error";
+        } finally { unlinkSync(filePath); }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("upload multipart content-type set")
+    .stage("execute", async () => {
+        const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
+        const filePath = join(tmpDir, "test.txt");
+        writeFileSync(filePath, "file data");
+        try {
+            return await CTGAPIClient.init(BASE_URL).upload("/echo", filePath);
+        } finally { unlinkSync(filePath); }
+    })
+    .assert("multipart content-type", (r) => r.body.headers["content-type"].includes("multipart/form-data"), true)
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // URL Normalization
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("URL: trailing slash on base, leading slash on path", async () => {
-    const client = CTGAPIClient.init(BASE_URL + "/");
-    const r = await client.GET("/echo");
-    return r.status === 200;
-});
+await CTGTest.init("URL trailing slash on base, leading slash on path")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL + "/").GET("/echo"))
+    .assert("status 200", (r) => r.status, 200)
+    .start(null, config);
 
-await selfTest("URL: no leading slash on path", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("echo");
-    return r.status === 200;
-});
+await CTGTest.init("URL no leading slash on path")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("echo"))
+    .assert("status 200", (r) => r.status, 200)
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // Transport Errors
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("error: connection refused", async () => {
-    try {
-        const client = CTGAPIClient.init("http://127.0.0.1:19999");
-        await client.GET("/anything");
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "CONNECTION_FAILED";
-    }
-});
+await CTGTest.init("error connection refused")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.init("http://127.0.0.1:19999").GET("/anything"); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "CONNECTION_FAILED" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw CONNECTION_FAILED", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("error: connection refused via static request", async () => {
-    try {
-        await CTGAPIClient.request("GET", "http://127.0.0.1:19999/anything");
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "CONNECTION_FAILED";
-    }
-});
+await CTGTest.init("error connection refused via static request")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", "http://127.0.0.1:19999/anything"); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "CONNECTION_FAILED" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("error: DNS failure", async () => {
-    try {
-        await CTGAPIClient.request("GET", "http://this-host-does-not-exist-ctg.invalid/path");
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError
-            && (e.type === "DNS_FAILED" || e.type === "CONNECTION_FAILED");
-    }
-});
+await CTGTest.init("error DNS failure")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", "http://this-host-does-not-exist-ctg.invalid/path"); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && (e.type === "DNS_FAILED" || e.type === "CONNECTION_FAILED") ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("error: timeout", async () => {
-    try {
-        const client = CTGAPIClient.init(BASE_URL, { timeout: 0.1 });
-        await client.GET("/slow", { delay: "5000" });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "TIMEOUT";
-    }
-});
+await CTGTest.init("error timeout")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.init(BASE_URL, { timeout: 0.1 }).GET("/slow", { delay: "5000" }); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "TIMEOUT" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw TIMEOUT", (r) => r, "threw")
+    .start(null, config);
 
 // ── Transport Error Data ─────────────────────────────────────
 
-await selfTest("transport error: data contains url and method", async () => {
-    try {
-        await CTGAPIClient.request("GET", "http://127.0.0.1:19999/path");
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError
-            && e.data !== null
-            && typeof e.data.url === "string"
-            && typeof e.data.method === "string";
-    }
-});
+await CTGTest.init("transport error data contains url and method")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", "http://127.0.0.1:19999/path"); return null; }
+        catch (e) { return e.data; }
+    })
+    .assert("has url", (d) => typeof d.url, "string")
+    .assert("has method", (d) => typeof d.method, "string")
+    .start(null, config);
 
-await selfTest("transport error: data does not contain auth headers", async () => {
-    try {
-        await CTGAPIClient.request("GET", "http://127.0.0.1:19999/path", {}, {}, {
-            "Authorization": "Bearer secret",
-            "Cookie": "session=abc"
-        });
-        return "no throw";
-    } catch (e) {
-        const dataStr = JSON.stringify(e.data);
-        return !dataStr.includes("secret") && !dataStr.includes("session=abc");
-    }
-});
+await CTGTest.init("transport error data no auth headers")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.request("GET", "http://127.0.0.1:19999/path", {}, {}, {
+                "Authorization": "Bearer secret", "Cookie": "session=abc"
+            });
+            return null;
+        } catch (e) { return JSON.stringify(e.data); }
+    })
+    .assert("no secret", (s) => !s.includes("secret"), true)
+    .assert("no session", (s) => !s.includes("session=abc"), true)
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // HTTP_ERROR (Caller-Initiated)
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("HTTP_ERROR: caller throws on non-ok response", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/status", { code: "404" });
-    try {
-        if (!r.ok) {
-            throw new CTGAPIClientError("HTTP_ERROR", `Status: ${r.status}`, r);
-        }
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError
-            && e.type === "HTTP_ERROR"
-            && e.data.status === 404;
-    }
-});
+await CTGTest.init("HTTP_ERROR caller throws on non-ok")
+    .stage("execute", async () => {
+        const r = await CTGAPIClient.init(BASE_URL).GET("/status", { code: "404" });
+        try {
+            if (!r.ok) throw new CTGAPIClientError("HTTP_ERROR", `Status: ${r.status}`, r);
+            return null;
+        } catch (e) { return { type: e.type, status: e.data.status }; }
+    })
+    .assert("type", (r) => r.type, "HTTP_ERROR")
+    .assert("status in data", (r) => r.status, 404)
+    .start(null, config);
 
-await selfTest("HTTP_ERROR: chainable with transport errors", async () => {
-    let httpHandled = false;
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/status", { code: "404" });
-    try {
-        if (!r.ok) throw new CTGAPIClientError("HTTP_ERROR", `Status: ${r.status}`, r);
-    } catch (e) {
-        e.on("TIMEOUT", () => {})
-         .on("HTTP_ERROR", () => { httpHandled = true; })
-         .otherwise(() => {});
-    }
-    return httpHandled;
-});
+await CTGTest.init("HTTP_ERROR chainable with transport errors")
+    .stage("handle", async () => {
+        const r = await CTGAPIClient.init(BASE_URL).GET("/status", { code: "404" });
+        let result = "unhandled";
+        try {
+            if (!r.ok) throw new CTGAPIClientError("HTTP_ERROR", `Status: ${r.status}`, r);
+        } catch (e) {
+            e.on("TIMEOUT", () => { result = "timeout"; })
+             .on("HTTP_ERROR", () => { result = "http_error"; })
+             .otherwise(() => { result = "other"; });
+        }
+        return result;
+    })
+    .assert("http handler", (r) => r, "http_error")
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // SSRF Allowlist
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("ssrf: disallowed host throws INVALID_URL", async () => {
-    try {
-        const client = CTGAPIClient.init(BASE_URL, { allowed_hosts: ["api.example.com"] });
-        await client.GET("/echo");
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "INVALID_URL";
-    }
-});
+await CTGTest.init("ssrf disallowed host throws INVALID_URL")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.init(BASE_URL, { allowed_hosts: ["api.example.com"] }).GET("/echo"); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("ssrf: disallowed scheme throws INVALID_URL", async () => {
-    try {
-        const client = CTGAPIClient.init(BASE_URL, { allowed_schemes: ["https"] });
-        await client.GET("/echo");
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "INVALID_URL";
-    }
-});
+await CTGTest.init("ssrf disallowed scheme throws INVALID_URL")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.init(BASE_URL, { allowed_schemes: ["https"] }).GET("/echo"); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("ssrf: allowed host succeeds", async () => {
-    const client = CTGAPIClient.init(BASE_URL, { allowed_hosts: ["127.0.0.1"] });
-    const r = await client.GET("/echo");
-    return r.status === 200;
-});
+await CTGTest.init("ssrf allowed host succeeds")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL, { allowed_hosts: ["127.0.0.1"] }).GET("/echo"))
+    .assert("status 200", (r) => r.status, 200)
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // Max Response Bytes
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("max response: exceeds limit throws REQUEST_FAILED", async () => {
-    try {
-        const client = CTGAPIClient.init(BASE_URL, { max_response_bytes: 1 });
-        await client.GET("/large", { size: "1024" });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED";
-    }
-});
+await CTGTest.init("max response exceeds limit throws REQUEST_FAILED")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.init(BASE_URL, { max_response_bytes: 1 }).GET("/large", { size: "1024" }); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED" ? "threw" : "wrong error"; }
+    })
+    .assert("threw", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("max response: under limit succeeds", async () => {
-    const client = CTGAPIClient.init(BASE_URL, { max_response_bytes: 1048576 });
-    const r = await client.GET("/large", { size: "100" });
-    return r.status === 200;
-});
+await CTGTest.init("max response under limit succeeds")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL, { max_response_bytes: 1048576 }).GET("/large", { size: "100" }))
+    .assert("status 200", (r) => r.status, 200)
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // Redirect Policy
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("redirect: 302 not followed, Location header present", async () => {
-    const client = CTGAPIClient.init(BASE_URL);
-    const r = await client.GET("/redirect");
-    return r.status === 302
-        && r.ok === false
-        && typeof r.headers["location"] === "string";
-});
+await CTGTest.init("redirect 302 not followed Location present")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/redirect"))
+    .assert("status 302", (r) => r.status, 302)
+    .assert("not ok", (r) => r.ok, false)
+    .assert("has location", (r) => typeof r.headers["location"], "string")
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
 // Caller Cancellation
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("cancellation: AbortSignal cancels request", async () => {
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 50);
-    try {
-        const client = CTGAPIClient.init(BASE_URL);
-        await client.GET("/slow", { delay: "5000" }, {}, { signal: controller.signal });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED";
-    }
-});
+await CTGTest.init("cancellation AbortSignal cancels request")
+    .stage("attempt", async () => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 50);
+        try {
+            await CTGAPIClient.init(BASE_URL).GET("/slow", { delay: "5000" }, {}, { signal: controller.signal });
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw REQUEST_FAILED", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("cancellation: pre-aborted signal fails immediately", async () => {
-    const controller = new AbortController();
-    controller.abort();
-    try {
-        const client = CTGAPIClient.init(BASE_URL);
-        await client.GET("/echo", {}, {}, { signal: controller.signal });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED";
-    }
-});
+await CTGTest.init("cancellation pre-aborted signal fails immediately")
+    .stage("attempt", async () => {
+        const controller = new AbortController();
+        controller.abort();
+        try {
+            await CTGAPIClient.init(BASE_URL).GET("/echo", {}, {}, { signal: controller.signal });
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw REQUEST_FAILED", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("cancellation: static request with signal", async () => {
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 50);
-    try {
-        await CTGAPIClient.request("GET", `${BASE_URL}/slow?delay=5000`, {}, {}, {}, 30, {
-            signal: controller.signal
-        });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED";
-    }
-});
+await CTGTest.init("cancellation static request with signal")
+    .stage("attempt", async () => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 50);
+        try {
+            await CTGAPIClient.request("GET", `${BASE_URL}/slow?delay=5000`, {}, {}, {}, 30, { signal: controller.signal });
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw REQUEST_FAILED", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("cancellation: timeout fires before caller abort → TIMEOUT", async () => {
-    // Timeout at 50ms, caller abort at 200ms — timeout should win
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 200);
-    try {
-        await CTGAPIClient.request("GET", `${BASE_URL}/slow?delay=5000`, {}, {}, {}, 0.05, {
-            signal: controller.signal
-        });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "TIMEOUT";
-    }
-});
+await CTGTest.init("cancellation timeout fires before caller abort -> TIMEOUT")
+    .stage("attempt", async () => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 200);
+        try {
+            await CTGAPIClient.request("GET", `${BASE_URL}/slow?delay=5000`, {}, {}, {}, 0.05, { signal: controller.signal });
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "TIMEOUT" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw TIMEOUT", (r) => r, "threw")
+    .start(null, config);
 
-await selfTest("cancellation: caller abort fires before timeout → REQUEST_FAILED", async () => {
-    // Caller abort at 50ms, timeout at 30s — caller should win
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 50);
-    try {
-        await CTGAPIClient.request("GET", `${BASE_URL}/slow?delay=5000`, {}, {}, {}, 30, {
-            signal: controller.signal
-        });
-        return "no throw";
-    } catch (e) {
-        return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED";
-    }
-});
+await CTGTest.init("cancellation caller abort fires before timeout -> REQUEST_FAILED")
+    .stage("attempt", async () => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 50);
+        try {
+            await CTGAPIClient.request("GET", `${BASE_URL}/slow?delay=5000`, {}, {}, {}, 30, { signal: controller.signal });
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "REQUEST_FAILED" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw REQUEST_FAILED", (r) => r, "threw")
+    .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
-// Content-Type Behavior
+// Summary + Cleanup
 // ══════════════════════════════════════════════════════════════
 
-await selfTest("content-type: multipart body skips auto Content-Type", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "ctg-test-"));
-    const filePath = join(tmpDir, "test.txt");
-    writeFileSync(filePath, "file data");
-    try {
-        const client = CTGAPIClient.init(BASE_URL);
-        const r = await client.upload("/echo", filePath);
-        // Content-Type should be multipart/form-data with boundary, not application/json
-        return r.body.headers["content-type"].includes("multipart/form-data");
-    } finally {
-        unlinkSync(filePath);
-    }
-});
-
-// ══════════════════════════════════════════════════════════════
-// Meta-Tests: CTGTest pipelines testing CTGAPIClient
-// ══════════════════════════════════════════════════════════════
-
-process.stdout.write("\n");
-if (!allPassed) {
-    process.stdout.write("Some tests FAILED.\n");
-    await stopServer(testServer);
-    process.exit(1);
-}
-process.stdout.write("All bootstrap tests passed.\n");
-
-process.stdout.write("\n=== ctg-js-api-client Meta-Tests ===\n\n");
-
-let metaPassed = true;
-let metaTotal = 0;
-let metaFailed = 0;
-
-// :: STRING, ctgTest, *, STRING? -> PROMISE(VOID)
-async function metaTest(label, test, subject, expectStatus = "pass") {
-    metaTotal++;
-    try {
-        const r = await test.start(subject, { output: "return-json" });
-        if (typeof r !== "object" || r === null) {
-            process.stdout.write(`  FAIL  ${label}\n`);
-            metaPassed = false;
-            metaFailed++;
-            return;
-        }
-        if (r.status === expectStatus) {
-            process.stdout.write(`  PASS  ${label}\n`);
-        } else {
-            process.stdout.write(`  FAIL  ${label}\n`);
-            process.stdout.write(`        expected status '${expectStatus}', got '${r.status}'\n`);
-            for (const step of r.steps) {
-                if (step.status !== "pass") {
-                    process.stdout.write(`        step '${step.name}': ${step.message}\n`);
-                }
-            }
-            metaPassed = false;
-            metaFailed++;
-        }
-    } catch (e) {
-        process.stdout.write(`  ERROR ${label}\n`);
-        process.stdout.write(`        ${e.constructor.name}: ${e.message}\n`);
-        metaPassed = false;
-        metaFailed++;
-    }
-}
-
-// ── Meta: GET → assert response shape ────────────────────────
-
-await metaTest(
-    "meta: GET returns valid response structure",
-    CTGTest.init("meta GET shape")
-        .stage("fetch", async () => {
-            const client = CTGAPIClient.init(BASE_URL);
-            return client.GET("/echo");
-        })
-        .assert("has status", (r) => typeof r.status, "number")
-        .assert("has ok", (r) => typeof r.ok, "boolean")
-        .assert("has headers", (r) => typeof r.headers, "object")
-        .assert("has body", (r) => "body" in r, true),
-    null
-);
-
-// ── Meta: POST → body echoed ─────────────────────────────────
-
-await metaTest(
-    "meta: POST sends and receives JSON body",
-    CTGTest.init("meta POST body")
-        .stage("post", async () => {
-            const client = CTGAPIClient.init(BASE_URL);
-            return client.POST("/echo", { name: "meta-test", value: 42 });
-        })
-        .assert("body name", (r) => r.body.body.name, "meta-test")
-        .assert("body value", (r) => r.body.body.value, 42),
-    null
-);
-
-// ── Meta: Token flow ─────────────────────────────────────────
-
-await metaTest(
-    "meta: auth token lifecycle",
-    CTGTest.init("meta auth flow")
-        .stage("create client", () => CTGAPIClient.init(BASE_URL))
-        .assert("no token initially", (c) => c.getToken(), null)
-        .stage("set token", (c) => { c.setToken("test-jwt-token-12345"); return c; })
-        .assert("token set", (c) => c.getToken(), "test-jwt-token-12345")
-        .stage("authenticate", async (c) => {
-            const r = await c.GET("/auth");
-            return { client: c, response: r };
-        })
-        .assert("auth succeeded", (ctx) => ctx.response.status, 200)
-        .stage("clear token", (ctx) => { ctx.client.clearToken(); return ctx.client; })
-        .assert("token cleared", (c) => c.getToken(), null),
-    null
-);
-
-// ── Meta: Error handling ─────────────────────────────────────
-
-await metaTest(
-    "meta: error on/otherwise pattern",
-    CTGTest.init("meta error chain")
-        .stage("create error", () => new CTGAPIClientError("TIMEOUT", "timed out"))
-        .stage("handle error", (e) => {
-            let result = "unhandled";
-            e.on("DNS_FAILED", () => { result = "dns"; })
-             .on("TIMEOUT", () => { result = "timeout"; })
-             .otherwise(() => { result = "other"; });
-            return result;
-        })
-        .assert("correct handler fired", (result) => result, "timeout"),
-    null
-);
-
-// ── Meta Summary ─────────────────────────────────────────────
-
-const metaPassedCount = metaTotal - metaFailed;
-process.stdout.write("\n");
-process.stdout.write(`Meta-tests: ${metaPassedCount}/${metaTotal} passed.\n`);
-
-if (!metaPassed) {
-    process.stdout.write("Some meta-tests FAILED.\n");
-    await stopServer(testServer);
-    process.exit(1);
-}
-process.stdout.write("All meta-tests passed.\n");
-
-// ── Final Summary ────────────────────────────────────────────
-
-process.stdout.write("\n=== All tests passed (bootstrap + meta) ===\n");
+process.stdout.write("\n=== All tests complete ===\n");
 await stopServer(testServer);
-process.exit(0);
+
+// Exit code driven by CTGTest._results (runner semantics)
+const failed = CTGTest._results.some((r) => r.status === "fail" || r.status === "error");
+process.exit(failed ? 1 : 0);

@@ -130,6 +130,25 @@ const response = await api.GET("/slow-endpoint", {}, {}, {
 | `max_response_bytes` | number | `null` | Maximum response body size |
 | `block_private_ips` | boolean | auto | Block private/loopback IPs (auto-enabled with allowlists) |
 
+## Security
+
+The following security properties are enforced and tested:
+
+* **SSRF allowlists** — `allowed_schemes` and `allowed_hosts` restrict requests to approved targets
+* **Private IP blocking** — loopback, private, and link-local addresses (IPv4, IPv6, and IPv4-mapped IPv6) are rejected when allowlists are configured or `block_private_ips` is enabled
+* **IDN normalization** — internationalized domain names are resolved to punycode before allowlist checks, preventing homograph attacks
+* **URL credential rejection** — URLs with embedded `user:pass@` are rejected with `INVALID_URL`
+* **URL credential redaction** — error data and error messages never contain raw credentials
+* **Header name validation** — enforced against RFC 7230 token characters
+* **Header value sanitization** — `\r`, `\n`, and `\0` are stripped to prevent CRLF and null byte injection
+* **Redirect safety** — redirects are not followed; 3xx responses return with `ok: false`
+* **Response size limits** — optional `max_response_bytes` prevents unbounded memory consumption
+
+The following security properties are guaranteed by Node.js defaults but **not tested** in the library's self-tests due to environment constraints:
+
+* **TLS certificate verification** — Node.js native `fetch` enables TLS verification by default. The library does not disable it and provides no option to do so. Validating this requires a self-signed certificate server, which is disproportionate for an in-process test suite. Applications should verify TLS behavior in their staging or CI environment against a known bad-cert endpoint.
+* **Proxy environment variable isolation** — Node.js native `fetch` does not honor `HTTP_PROXY`, `HTTPS_PROXY`, or `ALL_PROXY` environment variables. No additional code enforces this. If the HTTP transport layer is changed from native `fetch` to a custom dispatcher or agent, this guarantee must be re-validated.
+
 ## Notice
 
 `ctg-js-api-client` is under active development. The core API is stable. Security hardening and error classification may be refined.

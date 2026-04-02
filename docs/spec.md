@@ -398,7 +398,12 @@ static async request(method, url, body = {}, params = {}, headers = {}, timeout 
 1. **Validate method** — trim, uppercase, check against `VALID_METHODS`. Invalid
    throws `CTGAPIClientError("INVALID_METHOD")`.
 
-2. **Append query parameters** — if `params` is non-empty, build query string and
+2. **Reject URL credentials** — parse URL via `new URL(url)`. If `url.username` or
+   `url.password` is non-empty, throw `CTGAPIClientError("INVALID_URL", "URLs with
+   embedded credentials are not allowed")`. This applies to both static `request()`
+   and instance methods (via `_checkSsrf`).
+
+3. **Append query parameters** — if `params` is non-empty, build query string and
    append with `?` or `&` separator. Uses `new URLSearchParams(params).toString()`
    for encoding. **Serialization behavior:** `URLSearchParams` flattens values to
    strings via `.toString()`. Arrays are not natively supported — `{ tags: [1, 2] }`
@@ -408,23 +413,24 @@ static async request(method, url, body = {}, params = {}, headers = {}, timeout 
    Callers requiring specific array or nested object serialization formats should
    build the query string manually and append it to the path before calling.
 
-3. **Detect multipart** — check if `body` is a `FormData` instance. If not `FormData`,
+4. **Detect multipart** — check if `body` is a `FormData` instance. If not `FormData`,
    check top-level values for `Blob`, `Buffer`, or `ReadableStream` references. If
    found, build a `FormData` from the body map. Nested file references (non-top-level)
    are rejected with `CTGAPIClientError("INVALID_BODY")`.
 
-4. **Auto-set headers** — if body is non-empty, not multipart, and no `Content-Type`
+5. **Auto-set headers** — if body is non-empty, not multipart, and no `Content-Type`
    header is present (case-insensitive check), set `Content-Type: application/json`.
    If no `User-Agent` header is present, set `User-Agent: CTGAPIClient/1.0`.
 
-5. **Validate header names** — each header name must match
+6. **Validate header names** — each header name must match
    `/^[a-zA-Z0-9!#$%&'*+\-.^_`|~]+$/` (RFC 7230 token characters). Invalid names
    throw `CTGAPIClientError("INVALID_HEADER")`.
 
-6. **Sanitize header values** — strip `\r`, `\n`, and `\0` from all header values.
-   No error thrown — silent removal.
+7. **Sanitize header values** — strip `\r`, `\n`, and `\0` (null byte) from all
+   header values via `.replace(/[\r\n\0]/g, "")`. No error thrown — silent removal.
+   This prevents CRLF injection and null byte injection attacks.
 
-7. **Encode body** — for `POST`, `PUT`, `PATCH`:
+8. **Encode body** — for `POST`, `PUT`, `PATCH`:
    - If `FormData`: pass directly to `fetch` (it sets its own Content-Type with boundary)
    - Otherwise: `JSON.stringify(body)`. If encoding fails, throw
      `CTGAPIClientError("INVALID_BODY")`.
@@ -433,7 +439,7 @@ static async request(method, url, body = {}, params = {}, headers = {}, timeout 
      the fetch options is set to `undefined`. This is intentional: callers may pass
      a body map that gets ignored for these methods without causing an error.
 
-8. **Build fetch options:**
+9. **Build fetch options:**
    ```javascript
    {
        method: method,
@@ -444,7 +450,7 @@ static async request(method, url, body = {}, params = {}, headers = {}, timeout 
    }
    ```
 
-9. **Execute fetch** with `AbortController` for timeout. The timeout covers the
+10. **Execute fetch** with `AbortController` for timeout. The timeout covers the
    **entire request lifecycle** — connection, TLS, request send, and full response
    body receipt. The timer is only cleared after the body has been fully read:
    ```javascript
@@ -499,16 +505,16 @@ static async request(method, url, body = {}, params = {}, headers = {}, timeout 
      authoritative signal. If the caller's abort listener fires first (before
      the timer callback), `timedOut` remains `false` → `REQUEST_FAILED`.
 
-10. **Handle transport errors** — classify `fetch` errors (see Error Classification).
+11. **Handle transport errors** — classify `fetch` errors (see Error Classification).
 
-11. **Parse response** (using `bodyText` from step 9):
+12. **Parse response** (using `bodyText` from step 9):
     - Status code from `response.status`
     - Headers from `response.headers` — iterate entries, lowercase keys, comma-join
       duplicates except `set-cookie` (collected as array)
     - Body: read as text, then attempt `JSON.parse`. If parse fails, keep raw string.
       Empty body → empty string.
 
-12. **Return response structure:**
+13. **Return response structure:**
     ```javascript
     {
         status: number,         // HTTP status code
@@ -551,10 +557,34 @@ is preserved.
 _checkSsrf(url)
 ```
 
-Parses URL via `new URL(url)`. Checks:
-- If `_allowedSchemes` is set: `url.protocol` (without trailing `:`) must be in the list
-- If `_allowedHosts` is set: `url.hostname` must be in the list
-- Violations throw `CTGAPIClientError("INVALID_URL", "Blocked by SSRF allowlist")`
+Parses URL via `new URL(url)`. Checks (in order):
+1. If URL contains credentials (`url.username` or `url.password` non-empty), throw
+   `CTGAPIClientError("INVALID_URL", "URLs with embedded credentials are not allowed")`
+2. If `_allowedSchemes` is set: `url.protocol` (without trailing `:`) must be in the list.
+   Violation throws `CTGAPIClientError("INVALID_URL", "Blocked by SSRF allowlist")`
+3. If `_allowedHosts` is set: `url.hostname` is normalized to ASCII lowercase (punycode
+   for internationalized domain names — `new URL()` handles this automatically) and
+   checked against the list. Violation throws `CTGAPIClientError("INVALID_URL", "Blocked by SSRF allowlist")`
+4. If `_blockPrivateIPs` is `true` (default when any SSRF allowlist is configured):
+   reject private/link-local/loopback IP ranges. Detected by checking `url.hostname`
+   against:
+   - `127.x.x.x` (loopback)
+   - `10.x.x.x` (private)
+   - `172.16.x.x` – `172.31.x.x` (private)
+   - `192.168.x.x` (private)
+   - `169.254.x.x` (link-local)
+   - `0.0.0.0`
+   - `::1`, `::`, `fd00::/8`, `fe80::/10` (IPv6 equivalents)
+   Violation throws `CTGAPIClientError("INVALID_URL", "Private/internal addresses are blocked")`
+
+   `_blockPrivateIPs` is automatically `true` when `allowed_hosts` or `allowed_schemes`
+   is configured, and `false` otherwise. Can be explicitly set via config:
+   `{ block_private_ips: true }`.
+
+**IDN normalization:** `new URL()` automatically converts internationalized domain
+names to punycode (e.g., `аpi.example.com` with Cyrillic "а" becomes
+`xn--pi-8ta.example.com`). The allowlist check runs against the punycode form,
+preventing homograph attacks.
 
 ```javascript
 // :: OBJECT, STRING -> BOOL
@@ -681,7 +711,28 @@ Per design doc Security Considerations:
    response received.
 
 7. **Error data redaction** — error data includes `url`, `method`, and error code.
-   Never includes `Authorization` or `Cookie` header values.
+   Never includes `Authorization` or `Cookie` header values. URLs in error data
+   are redacted of embedded credentials: `https://user:pass@host/` becomes
+   `https://***:***@host/` in error data. Redaction uses `url.username` and
+   `url.password` replacement via `URL` object manipulation.
+
+8. **URL credential rejection** — URLs with embedded credentials
+   (`https://user:pass@host/`) are rejected with `INVALID_URL` in both static
+   `request()` and instance methods. This prevents credential leakage in logs,
+   error data, and redirect targets.
+
+9. **Private IP blocking** — when SSRF allowlists are configured (or
+   `block_private_ips: true`), requests to private/link-local/loopback addresses
+   are rejected with `INVALID_URL`. Covers IPv4 (`127.x`, `10.x`, `172.16-31.x`,
+   `192.168.x`, `169.254.x`, `0.0.0.0`) and IPv6 (`::1`, `::`, `fd00::/8`,
+   `fe80::/10`).
+
+10. **IDN/punycode normalization** — `new URL()` automatically normalizes
+    internationalized domain names to punycode. SSRF allowlist checks run against
+    the normalized form, preventing homograph attacks.
+
+11. **Null byte sanitization** — header values are stripped of `\0` in addition to
+    `\r` and `\n`, preventing null byte injection.
 
 ---
 
@@ -711,8 +762,13 @@ Every conformance test case from the design doc maps to this implementation as f
 | Error on/otherwise | `_handled` flag with chainable `on()` + `otherwise()` |
 | Timeout | `AbortController` + `setTimeout` wrapping fetch |
 | SSRF Allowlist | `_checkSsrf` with URL parsing |
+| Private IP Blocking | `_checkSsrf` private/link-local/loopback range checks |
+| IDN/Punycode Normalization | `new URL()` automatic punycode + allowlist check |
+| URL Credential Rejection | `request()` step 2 + `_checkSsrf` credential check |
+| URL Credential Redaction | Error data URL has credentials replaced with `***` |
+| Null Byte Sanitization | `.replace(/[\r\n\0]/g, "")` in header value sanitization |
 | Response Size Limit | Byte length check after `response.text()` |
-| Error Data Safety | `{ url, method, code }` — no auth/cookie headers |
+| Error Data Safety | `{ url, method, code }` — no auth/cookie headers, redacted URL |
 
 ---
 

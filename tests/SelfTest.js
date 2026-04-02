@@ -943,6 +943,134 @@ await CTGTest.init("transport error data no auth headers")
     .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
+// URL Credential Rejection
+// ══════════════════════════════════════════════════════════════
+
+await CTGTest.init("URL credentials in static request throws INVALID_URL")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", "http://user:pass@127.0.0.1/path"); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("URL credentials in instance request throws INVALID_URL")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.init("http://user:pass@127.0.0.1").GET("/path"); return "no throw"; }
+        catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("URL credentials redacted in error data")
+    .stage("attempt", async () => {
+        try { await CTGAPIClient.request("GET", "http://user:pass@127.0.0.1:19999/path"); return null; }
+        catch (e) { return e.data; }
+    })
+    .assert("no plaintext user", (d) => !d.url.includes("user:pass"), true)
+    .start(null, config);
+
+// ══════════════════════════════════════════════════════════════
+// Header Null Byte Sanitization
+// ══════════════════════════════════════════════════════════════
+
+await CTGTest.init("header value null byte stripped")
+    .stage("execute", () => CTGAPIClient.request("GET", `${BASE_URL}/echo`, {}, {}, {
+        "X-Test": "before\0after"
+    }))
+    .assert("null byte removed", (r) => r.body.headers["x-test"], "beforeafter")
+    .start(null, config);
+
+// ══════════════════════════════════════════════════════════════
+// Private IP Blocking
+// ══════════════════════════════════════════════════════════════
+
+await CTGTest.init("private IP blocked when SSRF configured")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://127.0.0.1", { allowed_hosts: ["api.example.com"] }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("private IP 10.x blocked when block_private_ips true")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://10.0.0.1", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("private IP 192.168.x blocked")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://192.168.1.1", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("private IP 172.16.x blocked")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://172.16.0.1", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("private IP 169.254.x link-local blocked")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://169.254.1.1", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("IPv6 loopback blocked")
+    .stage("attempt", async () => {
+        try {
+            await CTGAPIClient.init("http://[::1]", { block_private_ips: true }).GET("/echo");
+            return "no throw";
+        } catch (e) { return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`; }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+await CTGTest.init("private IPs not blocked when no SSRF config")
+    .stage("execute", () => CTGAPIClient.init(BASE_URL).GET("/echo"))
+    .assert("status 200", (r) => r.status, 200)
+    .start(null, config);
+
+// ══════════════════════════════════════════════════════════════
+// IDN / Punycode Normalization
+// ══════════════════════════════════════════════════════════════
+
+await CTGTest.init("IDN hostname normalized to punycode for allowlist check")
+    .stage("attempt", async () => {
+        // Cyrillic "а" in "аpi" — punycode is "xn--pi-8ta"
+        try {
+            await CTGAPIClient.init("http://\u0430pi.example.com", {
+                allowed_hosts: ["api.example.com"]
+            }).GET("/echo");
+            return "no throw";
+        } catch (e) {
+            // Should reject because punycode form doesn't match "api.example.com"
+            return e instanceof CTGAPIClientError && e.type === "INVALID_URL" ? "threw" : `wrong: ${e.type}`;
+        }
+    })
+    .assert("threw INVALID_URL", (r) => r, "threw")
+    .start(null, config);
+
+// ══════════════════════════════════════════════════════════════
 // HTTP_ERROR (Caller-Initiated)
 // ══════════════════════════════════════════════════════════════
 

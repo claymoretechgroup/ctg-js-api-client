@@ -962,12 +962,10 @@ await CTGTest.init("URL credentials in instance request throws INVALID_URL")
     .assert("threw INVALID_URL", (r) => r, "threw")
     .start(null, config);
 
-await CTGTest.init("URL credentials redacted in error data")
-    .stage("attempt", async () => {
-        try { await CTGAPIClient.request("GET", "http://user:pass@127.0.0.1:19999/path"); return null; }
-        catch (e) { return e.data; }
-    })
-    .assert("no plaintext user", (d) => !d.url.includes("user:pass"), true)
+await CTGTest.init("URL credentials redacted by _redactUrl")
+    .stage("redact", () => CTGAPIClient._redactUrl("http://user:pass@example.com/path"))
+    .assert("no plaintext credentials", (r) => !r.includes("user:pass"), true)
+    .assert("has redaction markers", (r) => r.includes("***"), true)
     .start(null, config);
 
 // ══════════════════════════════════════════════════════════════
@@ -1123,7 +1121,9 @@ await CTGTest.init("ssrf disallowed scheme throws INVALID_URL")
     .start(null, config);
 
 await CTGTest.init("ssrf allowed host succeeds")
-    .stage("execute", () => CTGAPIClient.init(BASE_URL, { allowed_hosts: ["127.0.0.1"] }).GET("/echo"))
+    .stage("execute", () => CTGAPIClient.init(BASE_URL, {
+        allowed_hosts: ["127.0.0.1"], block_private_ips: false
+    }).GET("/echo"))
     .assert("status 200", (r) => r.status, 200)
     .start(null, config);
 

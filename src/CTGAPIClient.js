@@ -577,14 +577,19 @@ export default class CTGAPIClient {
 
     // :: OBJECT, INT? -> VOID
     // Recursively checks for nested file references. Throws INVALID_BODY if found at depth > 0.
-    static _rejectNestedFiles(body, depth = 0) {
+    static _rejectNestedFiles(body, depth = 0, seen) {
+        if (!seen) seen = new WeakSet();
+        if (seen.has(body)) {
+            throw new CTGAPIClientError("INVALID_BODY", "Circular reference detected in request body");
+        }
+        seen.add(body);
         const values = Array.isArray(body) ? body : Object.values(body);
         for (const value of values) {
             if (depth > 0 && CTGAPIClient._isFileRef(value)) {
                 throw new CTGAPIClientError("INVALID_BODY", "File references must be top-level body values");
             }
             if (value && typeof value === "object" && !CTGAPIClient._isFileRef(value)) {
-                CTGAPIClient._rejectNestedFiles(value, depth + 1);
+                CTGAPIClient._rejectNestedFiles(value, depth + 1, seen);
             }
         }
     }

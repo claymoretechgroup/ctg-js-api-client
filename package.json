@@ -1,10 +1,14 @@
 {
     "name": "ctg-js-api-client",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Minimal HTTP API client for Node.js with typed errors and zero dependencies",
     "type": "module",
     "exports": {
-        ".": "./src/index.js"
+        ".": "./src/CTGAPIClient.js",
+        "./error": "./src/CTGAPIClientError.js"
+    },
+    "engines": {
+        "node": ">=19.7.0"
     },
     "scripts": {
         "test": "node tests/SelfTest.js"

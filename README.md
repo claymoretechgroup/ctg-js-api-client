@@ -14,7 +14,7 @@
 ## Install
 
 ```
-npm install ctg-js-api-client
+npm install claymoretechgroup/ctg-js-api-client
 ```
 
 Minimum Node.js version: 19.7+ (native `fetch`, `FormData`, `Headers.getSetCookie()`).

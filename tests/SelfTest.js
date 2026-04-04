@@ -8,7 +8,7 @@ import { writeFileSync, unlinkSync, mkdtempSync } from "node:fs"; // File ops fo
 import { join } from "node:path"; // Path utils
 import { tmpdir } from "node:os"; // Temp directory
 
-import CTGTest from "../../ctg-js-test/src/CTGTest.js"; // Test framework
+import CTGTest from "ctg-js-test"; // Test framework
 import { startServer, stopServer } from "./server.js"; // Test HTTP server
 
 // These will be implemented — import paths for what we're testing

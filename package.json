@@ -12,5 +12,8 @@
     },
     "scripts": {
         "test": "node tests/SelfTest.js"
+    },
+    "devDependencies": {
+        "ctg-js-test": "claymoretechgroup/ctg-js-test"
     }
 }

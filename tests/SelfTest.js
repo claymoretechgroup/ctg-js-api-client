@@ -1,10 +1,11 @@
 // Self-tests for ctg-js-api-client — error class + HTTP client
 //
-// Uses ctg-js-test pipelines for all tests.
+// Uses ctg-js-test v2.2 pipelines for all tests.
 // Starts an embedded node:http server for HTTP integration tests.
 // Server is always stopped on exit (pass, fail, or error).
 
 import CTGTest from "ctg-js-test"; // Test framework
+import CTGTestPredicates from "ctg-js-test/predicates"; // Convenience predicates
 import CTGTestConsoleFormatter from "ctg-js-test/formatter/console";
 import CTGTestResult from "ctg-js-test/result";
 import { startServer, stopServer } from "./server.js"; // Test HTTP server
@@ -45,7 +46,8 @@ try {
 
 const config = { timeout: 0 };
 const collector = [];
-const ctx = { CTGTest, CTGTestConsoleFormatter, CTGAPIClient, CTGAPIClientError, BASE_URL, config, collector };
+const P = CTGTestPredicates;
+const ctx = { CTGTest, P, CTGTestConsoleFormatter, CTGAPIClient, CTGAPIClientError, BASE_URL, config, collector };
 
 try {
     await runErrorConstruction(ctx);
